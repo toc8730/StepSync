@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({super.key});
@@ -8,6 +10,17 @@ class CreateAccountPage extends StatefulWidget {
 }
 
 class _CreateAccountPageState extends State<CreateAccountPage> {
+  final String apiUrl = "http://127.0.0.1:5000/register"; // For emulator
+
+  // api call to register user
+  Future<http.Response> addUser(String username, String password) async {
+    return http.post(
+      Uri.parse(apiUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'username': username, 'password': password}),
+    );
+  }
+
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmController = TextEditingController();
@@ -131,6 +144,17 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     );
                     return;
                   }
+                  
+                  addUser(username, password).then((res){ 
+                    String body = res.body;
+                    if (res.statusCode != 200) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(body)),
+                      );
+                      return;
+                    }
+                  }); //try to register the user, return if http status failed
+                  
 
                   // ✅ Success message
                   ScaffoldMessenger.of(context).showSnackBar(
