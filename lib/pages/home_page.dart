@@ -22,32 +22,23 @@ class HomePage extends StatelessWidget {
               }
             },
             itemBuilder: (BuildContext context) => [
-              const PopupMenuItem(
-                value: 'profile',
-                child: Text('Profile'),
-              ),
-              const PopupMenuItem(
-                value: 'signout',
-                child: Text('Sign Out'),
-              ),
+              const PopupMenuItem(value: 'profile', child: Text('Profile')),
+              const PopupMenuItem(value: 'signout', child: Text('Sign Out')),
             ],
             icon: Row(
               children: [
                 Text(
                   username,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const Icon(Icons.arrow_drop_down),
               ],
             ),
           ),
         ],
-      ),
-      body: const Center(
-        child: Text(
-          'This is the Home Page',
-          style: TextStyle(fontSize: 20),
-        ),
       ),
     );
   }
