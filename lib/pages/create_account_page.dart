@@ -22,6 +22,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Username
               TextField(
                 controller: _usernameController,
                 decoration: const InputDecoration(
@@ -31,6 +32,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 ),
               ),
               const SizedBox(height: 20),
+
+              // Password
               TextField(
                 controller: _passwordController,
                 obscureText: true,
@@ -41,6 +44,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 ),
               ),
               const SizedBox(height: 20),
+
+              // Confirm password
               TextField(
                 controller: _confirmController,
                 obscureText: true,
@@ -51,12 +56,15 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 ),
               ),
               const SizedBox(height: 30),
+
+              // Create Account button
               ElevatedButton(
                 onPressed: () {
                   final username = _usernameController.text.trim();
                   final password = _passwordController.text.trim();
                   final confirm = _confirmController.text.trim();
 
+                  // Check for empty fields
                   if (username.isEmpty || password.isEmpty || confirm.isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('All fields are required!')),
@@ -64,6 +72,23 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     return;
                   }
 
+                  // Password pattern
+                  final passwordPattern =
+                      r'^(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%^&*]).{8,}$';
+                  final regExp = RegExp(passwordPattern);
+
+                  if (!regExp.hasMatch(password)) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Password must be 8+ chars, include uppercase, number, and special char (!@#\$%^&*)',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Confirm password match
                   if (password != confirm) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Passwords do not match!')),
@@ -71,10 +96,14 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     return;
                   }
 
+                  // Success message
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Account created successfully!')),
+                    const SnackBar(
+                      content: Text('Account created successfully!'),
+                    ),
                   );
 
+                  // Go back to login
                   Navigator.pop(context);
                 },
                 child: const Text('Create Account'),
