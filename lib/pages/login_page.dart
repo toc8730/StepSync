@@ -23,7 +23,6 @@ class _LoginPageState extends State<LoginPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Username field
               TextField(
                 controller: _usernameController,
                 decoration: const InputDecoration(
@@ -33,8 +32,6 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // Password field
               TextField(
                 controller: _passwordController,
                 obscureText: true,
@@ -45,12 +42,9 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
               const SizedBox(height: 30),
-
-              // Buttons
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  // Log In button
                   ElevatedButton(
                     onPressed: () {
                       final username = _usernameController.text.trim();
@@ -59,13 +53,13 @@ class _LoginPageState extends State<LoginPage> {
                       if (username.isEmpty || password.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('Both username and password are required!'),
+                            content:
+                                Text('Both username and password are required!'),
                           ),
                         );
                         return;
                       }
 
-                      // Navigate to HomePage and clear fields on return
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -78,8 +72,6 @@ class _LoginPageState extends State<LoginPage> {
                     },
                     child: const Text('Log In'),
                   ),
-
-                  // Create Account button
                   ElevatedButton(
                     onPressed: () {
                       Navigator.push(

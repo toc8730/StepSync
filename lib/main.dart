@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
-import 'pages/home_page.dart';
-import 'pages/create_account_page.dart';
+import 'pages/notifications.dart'; // Add this import
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // await initNotifications(); // Initialize notifications before app starts
   runApp(const MyApp());
 }
 

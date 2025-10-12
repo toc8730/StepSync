@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'notifications.dart';
 
 class HomePage extends StatefulWidget {
   final String username;
@@ -9,28 +10,18 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // List to store schedule blocks
-  List<Map<String, String>> blocks = [];
+  final List<Map<String, String>> _blocks = [];
 
-  final _titleController = TextEditingController();
-  final _timeController = TextEditingController();
-  final _descController = TextEditingController();
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _timeController = TextEditingController();
+  final TextEditingController _descController = TextEditingController();
 
-  // Regex to enforce HH:MM-HH:MM format
-  final RegExp timeRegExp = RegExp(
-    r'^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$',
-  );
-
-  void _showCreateBlockDialog() {
-    _titleController.clear();
-    _timeController.clear();
-    _descController.clear();
-
+  void _showCreateDialog() {
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Create Block'),
+          title: const Text('Create a Block'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -40,9 +31,8 @@ class _HomePageState extends State<HomePage> {
               ),
               TextField(
                 controller: _timeController,
-                decoration: const InputDecoration(
-                  labelText: 'Time (HH:MM-HH:MM)',
-                ),
+                decoration:
+                    const InputDecoration(labelText: 'Time (e.g. 09:30-09:50)'),
               ),
               TextField(
                 controller: _descController,
@@ -61,30 +51,34 @@ class _HomePageState extends State<HomePage> {
                 final time = _timeController.text.trim();
                 final desc = _descController.text.trim();
 
-                if (title.isEmpty || time.isEmpty || desc.isEmpty) {
+                if (title.isEmpty || time.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('All fields are required')),
+                    const SnackBar(content: Text('Please fill all fields')),
                   );
                   return;
                 }
 
-                if (!timeRegExp.hasMatch(time)) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Time must be HH:MM-HH:MM')),
-                  );
-                  return;
-                }
-
+                // Add block and sort by start time
                 setState(() {
-                  blocks.add({'title': title, 'time': time, 'desc': desc});
-                  // Sort by start time
-                  blocks.sort((a, b) {
-                    final startA = a['time']!.split('-')[0];
-                    final startB = b['time']!.split('-')[0];
-                    return startA.compareTo(startB);
+                  _blocks.add({
+                    'title': title,
+                    'time': time,
+                    'description': desc,
+                  });
+
+                  _blocks.sort((a, b) {
+                    final timeA = a['time']!.split('-')[0];
+                    final timeB = b['time']!.split('-')[0];
+                    return timeA.compareTo(timeB);
                   });
                 });
 
+                // Schedule notification 5 min before start
+                scheduleNotification(title, time);
+
+                _titleController.clear();
+                _timeController.clear();
+                _descController.clear();
                 Navigator.pop(context);
               },
               child: const Text('Create'),
@@ -99,64 +93,41 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        automaticallyImplyLeading: false,
         title: Text('Welcome, ${widget.username}!'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _showCreateDialog,
+          ),
           PopupMenuButton<String>(
             onSelected: (value) {
-              if (value == 'profile') {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Profile button pressed')),
-                );
-              } else if (value == 'signout') {
+              if (value == 'signout') {
                 Navigator.pop(context);
               }
             },
-            itemBuilder: (BuildContext context) => [
-              const PopupMenuItem(value: 'profile', child: Text('Profile')),
+            itemBuilder: (context) => [
               const PopupMenuItem(value: 'signout', child: Text('Sign Out')),
             ],
-            icon: Row(
-              children: [
-                Text(
-                  widget.username,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const Icon(Icons.arrow_drop_down),
-              ],
-            ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showCreateBlockDialog,
-        child: const Icon(Icons.add),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: blocks.isEmpty
-            ? const Center(child: Text('No blocks created yet.'))
-            : ListView.builder(
-                itemCount: blocks.length,
-                itemBuilder: (context, index) {
-                  final block = blocks[index];
-                  return Card(
-                    child: ExpansionTile(
-                      title: Text('${block['time']} - ${block['title']}'),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Text(block['desc']!),
-                        ),
-                      ],
+      body: _blocks.isEmpty
+          ? const Center(child: Text('No blocks created yet'))
+          : ListView.builder(
+              itemCount: _blocks.length,
+              itemBuilder: (context, index) {
+                final block = _blocks[index];
+                return ExpansionTile(
+                  title: Text('${block['time']} — ${block['title']}'),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Text(block['description'] ?? ''),
                     ),
-                  );
-                },
-              ),
-      ),
+                  ],
+                );
+              },
+            ),
     );
   }
 }
