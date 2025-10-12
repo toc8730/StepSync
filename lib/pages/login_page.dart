@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'create_account_page.dart';
 import 'home_page.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -12,6 +14,8 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+
+  final String apiUrl = "http://127.0.0.1:5000/login"; // For emulator
 
   @override
   Widget build(BuildContext context) {
@@ -65,15 +69,33 @@ class _LoginPageState extends State<LoginPage> {
                         return;
                       }
 
-                      // Navigate to HomePage and clear fields on return
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => HomePage(username: username),
-                        ),
-                      ).then((_) {
-                        _usernameController.clear();
-                        _passwordController.clear();
+                      http.post(
+                        Uri.parse(apiUrl),
+                        headers: {'Content-Type': 'application/json'},
+                        body: json.encode({'username': username, 'password': password}),
+                      ).then((res){
+                        if (res.statusCode == 200) {
+                          final data = json.decode(res.body);
+
+                          // Navigate to HomePage and clear fields on return
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => HomePage(username: username, token: data['token']),
+                            ),
+                          ).then((_) {
+                            _usernameController.clear();
+                            _passwordController.clear();
+                          });
+                          
+                        }
+                        else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(res.body),
+                            ),
+                          );
+                        }
                       });
                     },
                     child: const Text('Log In'),

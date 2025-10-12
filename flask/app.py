@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -10,8 +11,11 @@ CORS(app)
 # Database config
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = 'super-secret-key'  # 🔒 Change this in production!
 
 db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
 
 # Database model
 class User(db.Model):
@@ -50,10 +54,20 @@ def login():
     password = data['password']
 
     user = User.query.filter_by(username=username).first()
+    
     if user and check_password_hash(user.password, password):
-        return jsonify({'message': 'Login successful'})
+        # Generate JWT token
+        token = create_access_token(identity=user.username)
+        return jsonify({'message': 'Login successful', 'token': token})
     else:
         return jsonify({'error': 'Invalid username or password'}), 401
+    
+# Protected route (requires JWT)
+@app.route('/profile', methods=['GET'])
+@jwt_required()
+def profile():
+    current_user = get_jwt_identity()
+    return jsonify({'message': f'Welcome, {current_user}! This is a protected route.'})
 
 if __name__ == '__main__':
     app.run(debug=True)

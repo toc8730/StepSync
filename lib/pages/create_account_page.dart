@@ -12,6 +12,8 @@ class CreateAccountPage extends StatefulWidget {
 class _CreateAccountPageState extends State<CreateAccountPage> {
   final String apiUrl = "http://127.0.0.1:5000/register"; // For emulator
 
+  final bool passwordRequirements = false; // for testing
+
   // api call to register user
   Future<http.Response> addUser(String username, String password) async {
     return http.post(
@@ -126,7 +128,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                   final passwordPattern =
                       r'^(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%^&*]).{8,}$';
                   final regExp = RegExp(passwordPattern);
-                  if (!regExp.hasMatch(password)) {
+                  if (!regExp.hasMatch(password) && passwordRequirements) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(

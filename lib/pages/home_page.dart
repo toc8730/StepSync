@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 class HomePage extends StatefulWidget {
   final String username;
-  const HomePage({super.key, required this.username});
+  final String token;
+  const HomePage({super.key, required this.username, required this.token});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -104,10 +106,16 @@ class _HomePageState extends State<HomePage> {
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) {
+              String token = widget.token;
               if (value == 'profile') {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Profile button pressed')),
-                );
+                http.get(
+                  Uri.parse('http://127.0.0.1:5000/profile'),
+                  headers: {'Authorization': 'Bearer $token'},
+                ).then((res){
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(res.body)),
+                  );
+                });
               } else if (value == 'signout') {
                 Navigator.pop(context);
               }
