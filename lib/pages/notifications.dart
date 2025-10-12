@@ -1,57 +1,55 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest_all.dart' as tz;
 
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
+class NotificationsHelper {
+  static final FlutterLocalNotificationsPlugin _notificationsPlugin =
+      FlutterLocalNotificationsPlugin();
 
-Future<void> initNotifications() async {
-  tz.initializeTimeZones();
+  static Future<void> initialize() async {
+    tz.initializeTimeZones();
 
-  const AndroidInitializationSettings initSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
+    const AndroidInitializationSettings androidInit =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const DarwinInitializationSettings iosInit = DarwinInitializationSettings();
 
-  const InitializationSettings initSettings =
-      InitializationSettings(android: initSettingsAndroid);
+    const InitializationSettings settings =
+        InitializationSettings(android: androidInit, iOS: iosInit);
 
-  await flutterLocalNotificationsPlugin.initialize(initSettings);
-}
+    await _notificationsPlugin.initialize(settings);
+  }
 
-Future<void> scheduleNotification(String title, String timeRange) async {
-  try {
-    final start = timeRange.split('-')[0]; // "09:30"
-    final parts = start.split(':');
-    final hour = int.parse(parts[0]);
-    final minute = int.parse(parts[1]);
-
-    final now = tz.TZDateTime.now(tz.local);
-    final scheduled = tz.TZDateTime(
-      tz.local,
-      now.year,
-      now.month,
-      now.day,
-      hour,
-      minute,
-    ).subtract(const Duration(minutes: 5)); // 5 minutes before
-
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-      0,
-      'Upcoming Block',
-      '$title starts in 5 minutes!',
-      scheduled,
+  static Future<void> scheduleNotification({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+  }) async {
+    await _notificationsPlugin.zonedSchedule(
+      id,
+      title,
+      body,
+      tz.TZDateTime.from(scheduledTime, tz.local),
       const NotificationDetails(
         android: AndroidNotificationDetails(
-          'main_channel',
-          'Main Notifications',
+          'task_channel',
+          'Task Notifications',
+          channelDescription: 'Notifications for tasks',
           importance: Importance.max,
           priority: Priority.high,
         ),
+        iOS: DarwinNotificationDetails(),
       ),
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      androidAllowWhileIdle: true,
+      // androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle, // ✅ required for v14+
     );
-  } catch (e) {
-    print('Error scheduling notification: $e');
+  }
+
+  static Future<void> cancelNotification(int id) async {
+    await _notificationsPlugin.cancel(id);
+  }
+
+  static Future<void> cancelAllNotifications() async {
+    await _notificationsPlugin.cancelAll();
   }
 }
