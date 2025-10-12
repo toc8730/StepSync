@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
-import 'notifications.dart';
+
+class Task {
+  String title;
+  String time; // format: HH:MM-HH:MM
+  String description;
+
+  Task({required this.title, required this.time, required this.description});
+}
 
 class HomePage extends StatefulWidget {
   final String username;
@@ -10,20 +17,31 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final List<Map<String, String>> _blocks = [];
+  List<Task> tasks = [];
 
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _timeController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
 
-  void _showCreateDialog() {
+  // Helper function to convert time string to minutes for sorting
+  int _timeToMinutes(String time) {
+    try {
+      final parts = time.split('-')[0].split(':');
+      final h = int.parse(parts[0]);
+      final m = int.parse(parts[1]);
+      return h * 60 + m;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  void _createTaskDialog() {
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Create a Block'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
+      builder: (context) => AlertDialog(
+        title: const Text('Create Task'),
+        content: SingleChildScrollView(
+          child: Column(
             children: [
               TextField(
                 controller: _titleController,
@@ -31,8 +49,7 @@ class _HomePageState extends State<HomePage> {
               ),
               TextField(
                 controller: _timeController,
-                decoration:
-                    const InputDecoration(labelText: 'Time (e.g. 09:30-09:50)'),
+                decoration: const InputDecoration(labelText: 'Time (HH:MM-HH:MM)'),
               ),
               TextField(
                 controller: _descController,
@@ -40,52 +57,50 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final title = _titleController.text.trim();
-                final time = _timeController.text.trim();
-                final desc = _descController.text.trim();
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _titleController.clear();
+              _timeController.clear();
+              _descController.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final title = _titleController.text.trim();
+              final time = _timeController.text.trim();
+              final desc = _descController.text.trim();
 
-                if (title.isEmpty || time.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please fill all fields')),
-                  );
-                  return;
-                }
+              final timePattern = RegExp(r'^\d{1,2}:\d{2}-\d{1,2}:\d{2}$');
+              if (title.isEmpty || time.isEmpty || desc.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('All fields are required!')),
+                );
+                return;
+              } else if (!timePattern.hasMatch(time)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Time must be in HH:MM-HH:MM format')),
+                );
+                return;
+              }
 
-                // Add block and sort by start time
-                setState(() {
-                  _blocks.add({
-                    'title': title,
-                    'time': time,
-                    'description': desc,
-                  });
+              setState(() {
+                tasks.add(Task(title: title, time: time, description: desc));
+                tasks.sort((a, b) => _timeToMinutes(a.time).compareTo(_timeToMinutes(b.time)));
+              });
 
-                  _blocks.sort((a, b) {
-                    final timeA = a['time']!.split('-')[0];
-                    final timeB = b['time']!.split('-')[0];
-                    return timeA.compareTo(timeB);
-                  });
-                });
-
-                // Schedule notification 5 min before start
-                scheduleNotification(title, time);
-
-                _titleController.clear();
-                _timeController.clear();
-                _descController.clear();
-                Navigator.pop(context);
-              },
-              child: const Text('Create'),
-            ),
-          ],
-        );
-      },
+              _titleController.clear();
+              _timeController.clear();
+              _descController.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -93,41 +108,69 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Welcome, ${widget.username}!'),
+        automaticallyImplyLeading: false,
+        title: const Text('Parent Dashboard'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _showCreateDialog,
-          ),
           PopupMenuButton<String>(
             onSelected: (value) {
-              if (value == 'signout') {
+              if (value == 'profile') {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Profile button pressed')),
+                );
+              } else if (value == 'signout') {
                 Navigator.pop(context);
               }
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'signout', child: Text('Sign Out')),
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'profile', child: Text('Profile')),
+              PopupMenuItem(value: 'signout', child: Text('Sign Out')),
             ],
+            icon: Row(
+              children: [
+                Text(
+                  widget.username,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                ),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
           ),
         ],
       ),
-      body: _blocks.isEmpty
-          ? const Center(child: Text('No blocks created yet'))
-          : ListView.builder(
-              itemCount: _blocks.length,
-              itemBuilder: (context, index) {
-                final block = _blocks[index];
-                return ExpansionTile(
-                  title: Text('${block['time']} — ${block['title']}'),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Text(block['description'] ?? ''),
-                    ),
-                  ],
-                );
-              },
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            ElevatedButton.icon(
+              onPressed: _createTaskDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Create Task'),
             ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: tasks.isEmpty
+                  ? const Center(child: Text('No tasks yet'))
+                  : ListView.builder(
+                      itemCount: tasks.length,
+                      itemBuilder: (context, index) {
+                        final task = tasks[index];
+                        return Card(
+                          child: ExpansionTile(
+                            title: Text('${task.time} | ${task.title}'),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text(task.description),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

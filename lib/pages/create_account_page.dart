@@ -11,9 +11,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmController = TextEditingController();
-
-  // 👇 New variable to track account type
-  String _accountType = 'Parent'; // Default selection
+  String _accountType = 'Parent';
+  bool _obscurePassword = true;
 
   @override
   Widget build(BuildContext context) {
@@ -22,11 +21,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: SingleChildScrollView(
-          // ✅ Prevents overflow on small screens
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Username
               TextField(
                 controller: _usernameController,
                 decoration: const InputDecoration(
@@ -36,20 +33,26 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // Password
               TextField(
                 controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
                   labelText: 'Password',
                   hintText: 'Enter password',
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
-
-              // Confirm password
               TextField(
                 controller: _confirmController,
                 obscureText: true,
@@ -60,8 +63,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 ),
               ),
               const SizedBox(height: 30),
-
-              // 👇 New radio button section
               const Text(
                 'Select Account Type:',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -93,15 +94,12 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 ],
               ),
               const SizedBox(height: 30),
-
-              // Create Account button
               ElevatedButton(
                 onPressed: () {
                   final username = _usernameController.text.trim();
                   final password = _passwordController.text.trim();
                   final confirm = _confirmController.text.trim();
 
-                  // Check empty fields
                   if (username.isEmpty || password.isEmpty || confirm.isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('All fields are required!')),
@@ -109,7 +107,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     return;
                   }
 
-                  // Password rules
                   final passwordPattern =
                       r'^(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%^&*]).{8,}$';
                   final regExp = RegExp(passwordPattern);
@@ -124,7 +121,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     return;
                   }
 
-                  // Confirm password match
                   if (password != confirm) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Passwords do not match!')),
@@ -132,7 +128,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     return;
                   }
 
-                  // ✅ Success message
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
@@ -141,7 +136,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     ),
                   );
 
-                  // Go back to login
                   Navigator.pop(context);
                 },
                 child: const Text('Create Account'),
