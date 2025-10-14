@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
-
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -22,7 +22,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
-    
+    profile_data = db.Column(db.Text)
 
 with app.app_context():
     db.create_all()
@@ -63,11 +63,34 @@ def login():
         return jsonify({'error': 'Invalid username or password'}), 401
     
 # Protected route (requires JWT)
+# Gets profile data (just schedule data for now)
 @app.route('/profile', methods=['GET'])
 @jwt_required()
-def profile():
+def profile_get():
     current_user = get_jwt_identity()
-    return jsonify({'message': f'Welcome, {current_user}! This is a protected route.'})
+    user = User.query.filter_by(username=current_user).first()
+    return user.profile_data
+
+# Appends schedule data with new block
+@app.route ('/profile/block', methods=['POST'])
+@jwt_required
+def profile_post():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    profile_data = json.JSONDecoder.decode(user.profile_data)
+    
+    # null-checking blocks (if this is the first block the user has added)
+    if profile_data['schedule_blocks'] is None:
+        profile_data['schedule_blocks'] = [ request.get_json()['block'] ]
+        
+    else:
+        profile_data['schedule_blocks'].append(request.get_json()['block'])
+
+    # save the change to database
+    user.profile_data = json.JSONEncoder.encode(profile_data)
+    db.session.bulk_save_objects([user])
+    return jsonify({'message': 'Block post successful'})
+    
 
 if __name__ == '__main__':
     app.run(debug=True)

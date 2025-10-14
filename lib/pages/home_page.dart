@@ -77,6 +77,14 @@ class _HomePageState extends State<HomePage> {
                   return;
                 }
 
+                String token = widget.token;
+
+                http.post(
+                  Uri.parse("http://127.0.0.1:5000/profile/block"), 
+                  headers: {'Authorization': 'Bearer $token'},
+                  body: {'block': {'title': title, 'time': time, 'desc': desc}}
+                );
+
                 setState(() {
                   blocks.add({'title': title, 'time': time, 'desc': desc});
                   // Sort by start time
