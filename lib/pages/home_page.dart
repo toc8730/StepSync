@@ -17,7 +17,7 @@ class Task {
 
   /// Convert start time to DateTime for sorting
   DateTime get startDateTime {
-    final start = time.split('-')[0]; // "09:30"
+    final start = time.split('-')[0];
     final parts = start.split(':');
     final now = DateTime.now();
     return DateTime(
@@ -51,7 +51,8 @@ class _HomePageState extends State<HomePage> {
   /// Schedule notification 5 minutes before task
   void _scheduleTaskNotification(Task task) {
     try {
-      final scheduledTime = task.startDateTime.subtract(const Duration(minutes: 5));
+      final scheduledTime =
+          task.startDateTime.subtract(const Duration(minutes: 5));
 
       NotificationsHelper.scheduleNotification(
         id: task.notificationId,
@@ -67,6 +68,37 @@ class _HomePageState extends State<HomePage> {
   /// Sort tasks by start time
   void _sortTasks() {
     tasks.sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
+  }
+
+  /// Validate time format HH:MM-HH:MM and ensure end > start
+  bool _isValidTime(String input) {
+    final regex = RegExp(r'^\d{2}:\d{2}-\d{2}:\d{2}$');
+    if (!regex.hasMatch(input)) return false;
+
+    try {
+      final parts = input.split('-');
+      final startParts = parts[0].split(':');
+      final endParts = parts[1].split(':');
+
+      final startHour = int.parse(startParts[0]);
+      final startMinute = int.parse(startParts[1]);
+      final endHour = int.parse(endParts[0]);
+      final endMinute = int.parse(endParts[1]);
+
+      if (startHour > 23 ||
+          startMinute > 59 ||
+          endHour > 23 ||
+          endMinute > 59) {
+        return false;
+      }
+
+      final startTime = Duration(hours: startHour, minutes: startMinute);
+      final endTime = Duration(hours: endHour, minutes: endMinute);
+
+      return endTime > startTime;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Show Create Task dialog
@@ -106,16 +138,30 @@ class _HomePageState extends State<HomePage> {
           ),
           ElevatedButton(
             onPressed: () {
+              final time = timeController.text.trim();
+              if (!_isValidTime(time)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Invalid time format! Please use HH:MM-HH:MM (e.g., 09:30-09:50) and ensure end time is after start time.',
+                    ),
+                  ),
+                );
+                return;
+              }
+
               final task = Task(
                 title: titleController.text,
                 description: descController.text,
-                time: timeController.text,
+                time: time,
                 notificationId: _nextNotificationId++,
               );
+
               setState(() {
                 tasks.add(task);
                 _sortTasks();
               });
+
               _scheduleTaskNotification(task);
               Navigator.pop(context);
             },
@@ -163,12 +209,25 @@ class _HomePageState extends State<HomePage> {
           ),
           ElevatedButton(
             onPressed: () {
+              final time = timeController.text.trim();
+              if (!_isValidTime(time)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Invalid time format! Please use HH:MM-HH:MM (e.g., 09:30-09:50) and ensure end time is after start time.',
+                    ),
+                  ),
+                );
+                return;
+              }
+
               setState(() {
                 task.title = titleController.text;
                 task.description = descController.text;
-                task.time = timeController.text;
+                task.time = time;
                 _sortTasks();
               });
+
               _scheduleTaskNotification(task);
               Navigator.pop(context);
             },
@@ -227,7 +286,8 @@ class _HomePageState extends State<HomePage> {
                 style: TextStyle(fontSize: 18),
               ),
               style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               ),
             ),
           ),
@@ -239,7 +299,8 @@ class _HomePageState extends State<HomePage> {
                 final task = tasks[index];
                 return Card(
                   color: task.hidden ? Colors.grey[300] : Colors.white,
-                  margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                  margin:
+                      const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                   child: ListTile(
                     title: Text('${task.time} - ${task.title}'),
                     subtitle: Column(
@@ -259,7 +320,8 @@ class _HomePageState extends State<HomePage> {
                         IconButton(
                           icon: const Icon(Icons.delete, size: 18),
                           onPressed: () {
-                            NotificationsHelper.cancelNotification(task.notificationId);
+                            NotificationsHelper.cancelNotification(
+                                task.notificationId);
                             setState(() {
                               tasks.removeAt(index);
                             });
@@ -271,7 +333,9 @@ class _HomePageState extends State<HomePage> {
                         ),
                         IconButton(
                           icon: Icon(
-                            task.hidden ? Icons.visibility : Icons.visibility_off,
+                            task.hidden
+                                ? Icons.visibility
+                                : Icons.visibility_off,
                             size: 18,
                           ),
                           onPressed: () {
