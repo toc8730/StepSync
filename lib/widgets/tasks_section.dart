@@ -1,0 +1,98 @@
+import 'package:flutter/material.dart';
+import '../task_controller.dart';
+import '../widgets/task_tile.dart';
+import '../widgets/task_editor_dialog.dart';
+
+class TasksSection extends StatelessWidget {
+  const TasksSection({super.key, required this.ctrl});
+  final TaskController ctrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        _header(context, 'Earlier Today', 'Before 12:00 PM', ctrl.earlierToday.length, Icons.wb_sunny_outlined),
+        ..._buildList(context, ctrl.earlierToday),
+
+        const SizedBox(height: 12),
+        _header(context, 'Later Today', 'After 12:00 PM', ctrl.laterToday.length, Icons.nights_stay_outlined),
+        ..._buildList(context, ctrl.laterToday),
+
+        const SizedBox(height: 12),
+        _header(context, 'Completed Tasks', 'Done today', ctrl.completed.length, Icons.check_circle),
+        ..._buildList(context, ctrl.completed, completed: true),
+
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+
+  Widget _header(BuildContext c, String title, String subtitle, int count, IconData icon) {
+    final color = Theme.of(c).colorScheme.primary;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        border: Border.all(color: color.withOpacity(0.2)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(c).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(subtitle, style: Theme.of(c).textTheme.bodySmall?.copyWith(
+                color: Theme.of(c).colorScheme.onSurface.withOpacity(0.65))),
+            ],
+          )),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+            decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(999)),
+            child: Text('$count', style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildList(BuildContext context, List items, {bool completed = false}) {
+    if (items.isEmpty) {
+      return [Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text('No tasks here.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+        )),
+      )];
+    }
+    return [
+      const SizedBox(height: 8),
+      ...List.generate(items.length, (i) {
+        final t = items[i];
+        return TaskTile(
+          task: t,
+          onToggle: () {
+            final all = ctrl.all;
+            final idx = all.indexOf(t);
+            if (idx != -1) ctrl.toggleCompleted(idx);
+          },
+          onEdit: () async {
+            final all = ctrl.all;
+            final idx = all.indexOf(t);
+            if (idx == -1) return;
+            final edited = await TaskEditorDialog.show(context, initial: t);
+            if (edited != null) ctrl.update(idx, edited);
+          },
+          onDelete: () {
+            final all = ctrl.all;
+            final idx = all.indexOf(t);
+            if (idx != -1) ctrl.removeAt(idx);
+          },
+        );
+      }),
+    ];
+  }
+}
