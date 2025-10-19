@@ -22,7 +22,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
-    profile_data = db.Column(db.Text)
+    profile_data = db.Column(db.Text) # text is just string w/o chr limit
 
 with app.app_context():
     db.create_all()
@@ -34,13 +34,15 @@ def register():
     username = data['username']
     password = data['password']
 
+    default_profile_data = json.JSONEncoder().encode({'schedule_blocks': ''}) # change this later
+
     # Check if user already exists
     if User.query.filter_by(username=username).first():
         return jsonify({'error': 'Username already exists'}), 400
 
     # Hash the password
     hashed_pw = generate_password_hash(password)
-    new_user = User(username=username, password=hashed_pw)
+    new_user = User(username=username, password=hashed_pw, profile_data=default_profile_data)
     db.session.add(new_user)
     db.session.commit()
 
@@ -77,7 +79,7 @@ def profile_get():
 def profile_post():
     current_user = get_jwt_identity()
     user = User.query.filter_by(username=current_user).first()
-    profile_data = json.JSONDecoder.decode(user.profile_data)
+    profile_data = json.JSONDecoder().decode(user.profile_data)
     
     # null-checking blocks (if this is the first block the user has added)
     if profile_data['schedule_blocks'] is None:
