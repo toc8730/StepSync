@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'create_account_page.dart';
-import 'home_page.dart';
+import 'package:my_app/pages/homepage.dart';
+import 'package:my_app/pages/create_account_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -12,86 +12,82 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  bool _obscurePassword = true;
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _navigateToCreateAccount() async {
+    // Push Create Account screen and wait for return
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CreateAccountPage()),
+    );
+
+    // Clear inputs when coming back from Create Account
+    _usernameController.clear();
+    _passwordController.clear();
+    setState(() {}); // update UI if needed
+  }
+
+  void _signIn() {
+    // TODO: add real auth
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const HomePage()),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Login Page')),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Center(
+      appBar: AppBar(title: const Text('Login')),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TextField(
                 controller: _usernameController,
                 decoration: const InputDecoration(
+                  labelText: 'Username or Email',
                   border: OutlineInputBorder(),
-                  labelText: 'Username',
-                  hintText: 'Enter your username',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _passwordController,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  labelText: 'Password',
-                  hintText: 'Enter your password',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(height: 30),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  ElevatedButton(
-                    onPressed: () {
-                      final username = _usernameController.text.trim();
-                      final password = _passwordController.text.trim();
-
-                      if (username.isEmpty || password.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Both username and password are required!'),
-                          ),
-                        );
-                        return;
-                      }
-
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => HomePage(username: username),
-                        ),
-                      ).then((_) {
-                        _usernameController.clear();
-                        _passwordController.clear();
-                      });
-                    },
-                    child: const Text('Log In'),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _signIn,
+                      child: const Text('Sign In'),
+                    ),
                   ),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const CreateAccountPage(),
-                        ),
-                      );
-                    },
-                    child: const Text('Create Account'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _navigateToCreateAccount,
+                      child: const Text('Create Account'),
+                    ),
                   ),
                 ],
               ),
