@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
-import 'pages/home_page.dart';
+import 'pages/homepage.dart';
 import 'pages/create_account_page.dart';
 
 void main() {
