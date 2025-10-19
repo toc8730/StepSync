@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class HomePage extends StatefulWidget {
   final String username;
@@ -22,6 +23,38 @@ class _HomePageState extends State<HomePage> {
   final RegExp timeRegExp = RegExp(
     r'^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$',
   );
+
+  void loadBlocks(String token, BuildContext context) {
+    http.get(
+      Uri.parse("http://127.0.0.1:5000/profile"), 
+      headers: {'Authorization': 'Bearer $token'}
+    ).then((res){
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+
+        setState(() {
+          blocks = List<Map<String, String>>.from(
+            (data['schedule_blocks'] ?? []).map((b) => Map<String, String>.from(b)),
+          );
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(res.body)),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(res.body)),
+        );
+      }
+    });
+  }
+
+@override
+void initState() {
+  super.initState();
+  loadBlocks(widget.token, context);
+}
+
 
   void _showCreateBlockDialog() {
     _titleController.clear();
@@ -81,8 +114,8 @@ class _HomePageState extends State<HomePage> {
 
                 http.post(
                   Uri.parse("http://127.0.0.1:5000/profile/block"), 
-                  headers: {'Authorization': 'Bearer $token'},
-                  body: {'block': {'title': title, 'time': time, 'desc': desc}}
+                  headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+                  body: json.encode({'block': {'title': title, 'time': time, 'desc': desc}})
                 );
 
                 setState(() {

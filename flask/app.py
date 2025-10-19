@@ -75,22 +75,22 @@ def profile_get():
 
 # Appends schedule data with new block
 @app.route ('/profile/block', methods=['POST'])
-@jwt_required
+@jwt_required()
 def profile_post():
     current_user = get_jwt_identity()
     user = User.query.filter_by(username=current_user).first()
     profile_data = json.JSONDecoder().decode(user.profile_data)
     
     # null-checking blocks (if this is the first block the user has added)
-    if profile_data['schedule_blocks'] is None:
+    if not profile_data.get('schedule_blocks'):
         profile_data['schedule_blocks'] = [ request.get_json()['block'] ]
         
     else:
         profile_data['schedule_blocks'].append(request.get_json()['block'])
 
     # save the change to database
-    user.profile_data = json.JSONEncoder.encode(profile_data)
-    db.session.bulk_save_objects([user])
+    user.profile_data = json.JSONEncoder().encode(profile_data)
+    db.session.commit()
     return jsonify({'message': 'Block post successful'})
     
 
