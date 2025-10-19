@@ -3,7 +3,8 @@ import '../task_controller.dart';
 import '../widgets/tasks_section.dart';
 import '../widgets/task_editor_dialog.dart';
 import '../models/task.dart';
-import 'login_page.dart'; // <-- add this import
+import 'login_page.dart';
+import 'profile_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,18 +24,11 @@ class _HomePageState extends State<HomePage> {
   void _onMenu(String value) {
     switch (value) {
       case 'profile':
-        // Placeholder: show a simple dialog or route later
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Profile'),
-            content: const Text('Profile screen coming soon.'),
-            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-          ),
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ProfilePage()),
         );
         break;
       case 'signout':
-        // Sign out: go back to login, clear back stack so inputs are fresh
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginPage()),
           (route) => false,

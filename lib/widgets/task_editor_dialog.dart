@@ -46,9 +46,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
     _currentStep = 0;
     _stepCtrl.text = _steps[_currentStep];
 
-    // Auto-update UI (e.g., Next button enablement) while typing steps
     _stepCtrl.addListener(() => setState(() {}));
-    // Also update preview as user types times
     _startCtrl.addListener(() => setState(() {}));
     _endCtrl.addListener(() => setState(() {}));
   }
@@ -65,23 +63,22 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
   // -------- Validation
   String? _timeValidator(String? value) {
     final v = value?.trim() ?? '';
-    if (v.isEmpty) return null; // optional field
+    if (v.isEmpty) return null; // optional
     if (!_timeRe.hasMatch(v)) return 'Use H:MM (1–12:00–59)';
     return null;
   }
 
   bool _isValidTime(String? v) => (v != null && v.trim().isNotEmpty && _timeRe.hasMatch(v.trim()));
 
-  // -------- Time formatting preview with invalid detection
+  // -------- Time preview with robust AM/PM inference
   String _displayTimePreview() {
     final start = _startCtrl.text.trim();
     final end   = _endCtrl.text.trim();
     final hasStart = start.isNotEmpty;
     final hasEnd   = end.isNotEmpty;
 
-    if (!hasStart && !hasEnd) return ''; // nothing to preview
+    if (!hasStart && !hasEnd) return '';
 
-    // If any non-empty time is invalid -> show invalid message
     final startOk = !hasStart || _isValidTime(start);
     final endOk   = !hasEnd   || _isValidTime(end);
     if (!startOk || !endOk) return 'Invalid time format. Use H:MM (1–12:00–59)';
@@ -92,7 +89,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
       final parts = hhmm.split(':');
       final h = int.parse(parts[0]);           // 1..12
       final mm = parts[1].padLeft(2, '0');     // 00..59
-      return (mm == '00') ? '$h' : '$h:$mm';   // drop :00 for display
+      return (mm == '00') ? '$h' : '$h:$mm';   // drop :00
     }
     String lower(String p) => p.toLowerCase();
 
@@ -106,9 +103,22 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
     // both present, valid
     final sHour = int.parse(start.split(':')[0]); // 1..12
     final eHour = int.parse(end.split(':')[0]);   // 1..12
-    String endPeriod = period;                    // default to start period
-    if (period == 'AM' && eHour < sHour) {
-      endPeriod = 'PM'; // e.g., 11:00 AM -> 1:00 PM
+    String endPeriod = period;
+
+    if (period == 'AM') {
+      if (eHour == 12) {
+        endPeriod = 'PM';
+      } else if (eHour < sHour) {
+        endPeriod = 'PM';
+      }
+    }
+
+    if (period == 'PM') {
+      if (eHour == 12) {
+        endPeriod = 'AM';
+      } else if (eHour < sHour) {
+        endPeriod = 'AM';
+      }
     }
 
     final left  = period.isEmpty ? fmtCore(start) : '${fmtCore(start)} ${lower(period)}';
@@ -116,7 +126,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
     return '$left – $right';
   }
 
-  // -------- Step nav (no Add/Remove; Next only if current not empty)
+  // -------- Steps (no add/remove; Next only if current not empty; prune on save)
   bool get _currentStepEmpty => _stepCtrl.text.trim().isEmpty;
 
   void _goPrev() {
@@ -129,7 +139,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
   }
 
   void _goNext() {
-    if (_currentStepEmpty) return; // block if empty
+    if (_currentStepEmpty) return;
     _steps[_currentStep] = _stepCtrl.text;
     if (_currentStep + 1 < _steps.length) {
       setState(() {
@@ -137,7 +147,6 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
         _stepCtrl.text = _steps[_currentStep];
       });
     } else {
-      // implicit "add": new blank step, move to it
       setState(() {
         _steps.add('');
         _currentStep++;
@@ -147,10 +156,9 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
   }
 
   void _pruneEmptyStepsInPlace() {
-    // remove all empty steps and keep order; adjust index
     _steps = _steps.where((s) => s.trim().isNotEmpty).toList();
     if (_steps.isEmpty) {
-      _steps = ['']; // keep one editable slot
+      _steps = [''];
       _currentStep = 0;
       _stepCtrl.text = '';
       return;
@@ -160,7 +168,6 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
   }
 
   void _save() {
-    // persist current step text before validating and pruning
     _steps[_currentStep] = _stepCtrl.text;
 
     if (!_formKey.currentState!.validate()) return;
@@ -168,7 +175,6 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) return;
 
-    // prune empties and collapse indices
     _pruneEmptyStepsInPlace();
 
     final task = Task(
@@ -205,7 +211,6 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
               ),
               const SizedBox(height: 8),
 
-              // Times + Period
               Row(
                 children: [
                   Expanded(
@@ -224,7 +229,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
                     child: TextFormField(
                       controller: _endCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'End (e.g., 1:00)',
+                        labelText: 'End (e.g., 12:15)',
                         helperText: 'H:MM (1–12:00–59)',
                       ),
                       keyboardType: TextInputType.datetime,
@@ -243,17 +248,12 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
                 ],
               ),
 
-              // Live display preview (also shows invalid message)
               const SizedBox(height: 8),
               if (timePreview.isNotEmpty)
-                Text(
-                  timePreview,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+                Text(timePreview, style: Theme.of(context).textTheme.bodyMedium),
 
               const SizedBox(height: 12),
 
-              // Steps navigator (no add/remove; Next only if current not empty)
               Row(
                 children: [
                   IconButton(
@@ -284,11 +284,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
               TextFormField(
                 controller: _stepCtrl,
                 decoration: const InputDecoration(labelText: 'Step text'),
-                onChanged: (v) {
-                  _steps[_currentStep] = v;
-                  // setState() is already triggered by the listener, but keeping this is safe
-                  setState(() {});
-                },
+                onChanged: (v) => _steps[_currentStep] = v,
                 maxLines: null,
               ),
             ],

@@ -13,6 +13,21 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _obscure = true;
+  bool _canSignIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Enable Sign In only when both fields are non-empty
+    _usernameController.addListener(_refreshCanSignIn);
+    _passwordController.addListener(_refreshCanSignIn);
+  }
+
+  void _refreshCanSignIn() {
+    final can = _usernameController.text.trim().isNotEmpty &&
+        _passwordController.text.trim().isNotEmpty;
+    if (can != _canSignIn) setState(() => _canSignIn = can);
+  }
 
   @override
   void dispose() {
@@ -22,19 +37,23 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _navigateToCreateAccount() async {
-    // Push Create Account screen and wait for return
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CreateAccountPage()),
     );
-
-    // Clear inputs when coming back from Create Account
+    // Clear inputs when returning from Create Account
     _usernameController.clear();
     _passwordController.clear();
-    setState(() {}); // update UI if needed
+    _refreshCanSignIn();
   }
 
   void _signIn() {
-    // TODO: add real auth
+    // Guard (belt & suspenders)
+    if (!_canSignIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter your username and password.')),
+      );
+      return;
+    }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomePage()),
     );
@@ -74,7 +93,7 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   Expanded(
                     child: FilledButton(
-                      onPressed: _signIn,
+                      onPressed: _canSignIn ? _signIn : null,
                       child: const Text('Sign In'),
                     ),
                   ),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/task.dart';
 
-class TaskTile extends StatelessWidget {
+class TaskTile extends StatefulWidget {
   const TaskTile({
     super.key,
     required this.task,
@@ -18,80 +18,111 @@ class TaskTile extends StatelessWidget {
   final bool strikeThroughWhenCompleted;
 
   @override
+  State<TaskTile> createState() => _TaskTileState();
+}
+
+class _TaskTileState extends State<TaskTile> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    final applyStrike = strikeThroughWhenCompleted && task.completed;
-    final hasSteps = task.steps.any((s) => s.trim().isNotEmpty);
+    final t = widget.task;
+    final applyStrike = widget.strikeThroughWhenCompleted && t.completed;
+    final hasSteps = t.steps.any((s) => s.trim().isNotEmpty);
+
+    // Right-side controls + chevron
+    final trailingControls = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Tooltip(
+          message: 'Edit task',
+          child: IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: widget.onEdit,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        Tooltip(
+          message: 'Delete task',
+          child: IconButton(
+            icon: const Icon(Icons.delete_outline),
+            onPressed: widget.onDelete,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        Tooltip(
+          message: t.completed ? 'Mark as not completed' : 'Mark as completed',
+          child: IconButton(
+            icon: Icon(t.completed ? Icons.check_circle : Icons.check_circle_outline),
+            onPressed: widget.onToggle,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Tooltip(
+          message: _expanded ? 'Collapse' : 'Expand',
+          child: AnimatedRotation(
+            duration: const Duration(milliseconds: 200),
+            turns: _expanded ? 0.5 : 0.0, // rotate chevron when expanded
+            child: const Icon(Icons.expand_more),
+          ),
+        ),
+      ],
+    );
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      child: ExpansionTile(
-        maintainState: true,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Theme(
+        // Remove default trailing chevron spacing from ExpansionTile
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: false,
+          onExpansionChanged: (v) => setState(() => _expanded = v),
+          // We'll supply our own trailing (buttons + chevron)
+          trailing: trailingControls,
+          // We move the complete toggle to the right; no leading icon.
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
 
-        leading: IconButton(
-          icon: Icon(task.completed ? Icons.check_circle : Icons.check_circle_outline),
-          tooltip: task.completed ? 'Mark as not completed' : 'Mark as completed',
-          onPressed: onToggle,
-        ),
-
-        title: Text(
-          task.title,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            decoration: applyStrike ? TextDecoration.lineThrough : null,
+          title: Text(
+            t.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              decoration: applyStrike ? TextDecoration.lineThrough : null,
+            ),
           ),
+          subtitle: Text(_formatDisplayTime(t)),
+
+          children: hasSteps
+              ? <Widget>[
+                  const SizedBox(height: 6),
+                  ...t.steps
+                      .where((s) => s.trim().isNotEmpty)
+                      .map((s) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('• '),
+                                Expanded(child: Text(s.trim())),
+                              ],
+                            ),
+                          )),
+                ]
+              : const <Widget>[],
         ),
-
-        subtitle: Text(_formatDisplayTime(task)),
-
-        children: hasSteps
-            ? <Widget>[
-                const SizedBox(height: 6),
-                ...task.steps
-                    .where((s) => s.trim().isNotEmpty)
-                    .map((s) => Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('• '),
-                              Expanded(child: Text(s.trim())),
-                            ],
-                          ),
-                        )),
-                if (onEdit != null || onDelete != null) ...[
-                  const Divider(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (onEdit != null)
-                        TextButton.icon(
-                          onPressed: onEdit,
-                          icon: const Icon(Icons.edit),
-                          label: const Text('Edit'),
-                        ),
-                      if (onDelete != null) const SizedBox(width: 8),
-                      if (onDelete != null)
-                        TextButton.icon(
-                          onPressed: onDelete,
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Delete'),
-                        ),
-                    ],
-                  ),
-                ],
-              ]
-            : const <Widget>[],
       ),
     );
   }
 
-  // Display like "11 am – 1 pm" with smart end-period inference.
+  // Display like "11:45 pm – 12:15 am" with robust end-period inference,
+  // including the 11 → 12 boundary you flagged.
   String _formatDisplayTime(Task t) {
     final start = t.startTime?.trim();
     final end   = t.endTime?.trim();
-    final period = (t.period ?? '').trim().toUpperCase();
+    final startPeriod = (t.period ?? '').trim().toUpperCase();
 
     bool _valid(String? hhmm) {
       if (hhmm == null || hhmm.isEmpty) return false;
@@ -110,23 +141,44 @@ class TaskTile extends StatelessWidget {
 
     if (!_valid(start) && !_valid(end)) return '';
     if (_valid(start) && !_valid(end)) {
-      if (period.isEmpty) return _fmt(start!);
-      return '${_fmt(start!)} ${_lower(period)}';
+      if (startPeriod.isEmpty) return _fmt(start!);
+      return '${_fmt(start!)} ${_lower(startPeriod)}';
     }
     if (!_valid(start) && _valid(end)) {
-      if (period.isEmpty) return _fmt(end!);
-      return '${_fmt(end!)} ${_lower(period)}';
+      if (startPeriod.isEmpty) return _fmt(end!);
+      return '${_fmt(end!)} ${_lower(startPeriod)}';
     }
 
     // both valid
     final sHour = int.parse(start!.split(':')[0]); // 1..12
     final eHour = int.parse(end!.split(':')[0]);   // 1..12
-    String endPeriod = period;
-    if (period == 'AM' && eHour < sHour) {
-      endPeriod = 'PM';
+    String endPeriod = startPeriod;
+
+    // Robust period inference:
+    // AM case:
+    //  - if end hour == 12, it flips to PM (e.g., 11:30 AM -> 12:15 PM)
+    //  - else if end hour < start hour, it also flips to PM (e.g., 10:30 AM -> 9:45 PM is unusual but respected)
+    if (startPeriod == 'AM') {
+      if (eHour == 12) {
+        endPeriod = 'PM';
+      } else if (eHour < sHour) {
+        endPeriod = 'PM';
+      }
     }
-    final left  = period.isEmpty ? _fmt(start) : '${_fmt(start)} ${_lower(period)}';
-    final right = endPeriod.isEmpty ? _fmt(end) : '${_fmt(end)} ${_lower(endPeriod)}';
+
+    // PM case:
+    //  - if end hour == 12, it flips to AM (crossing midnight: 11:45 PM -> 12:15 AM)
+    //  - else if end hour < start hour, also flips to AM (e.g., 10:30 PM -> 1:00 AM)
+    if (startPeriod == 'PM') {
+      if (eHour == 12) {
+        endPeriod = 'AM';
+      } else if (eHour < sHour) {
+        endPeriod = 'AM';
+      }
+    }
+
+    final left  = startPeriod.isEmpty ? _fmt(start) : '${_fmt(start)} ${_lower(startPeriod)}';
+    final right = endPeriod.isEmpty   ? _fmt(end)   : '${_fmt(end)} ${_lower(endPeriod)}';
     return '$left – $right';
   }
 }
