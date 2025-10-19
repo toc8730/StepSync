@@ -12,16 +12,16 @@ class TasksSection extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        _header(context, 'Earlier Today', 'Before 12:00 PM', ctrl.earlierToday.length, Icons.wb_sunny_outlined),
-        ..._buildList(context, ctrl.earlierToday),
+        _header(context, 'Earlier Today', 'Before now', ctrl.earlierToday.length, Icons.wb_sunny_outlined),
+        ..._buildList(context, ctrl.earlierToday, strikeThroughWhenCompleted: true),
 
         const SizedBox(height: 12),
-        _header(context, 'Later Today', 'After 12:00 PM', ctrl.laterToday.length, Icons.nights_stay_outlined),
-        ..._buildList(context, ctrl.laterToday),
+        _header(context, 'Later Today', 'After now', ctrl.laterToday.length, Icons.nights_stay_outlined),
+        ..._buildList(context, ctrl.laterToday, strikeThroughWhenCompleted: true),
 
         const SizedBox(height: 12),
         _header(context, 'Completed Tasks', 'Done today', ctrl.completed.length, Icons.check_circle),
-        ..._buildList(context, ctrl.completed, completed: true),
+        ..._buildList(context, ctrl.completed, strikeThroughWhenCompleted: false),
 
         const SizedBox(height: 80),
       ],
@@ -41,14 +41,17 @@ class TasksSection extends StatelessWidget {
         children: [
           Icon(icon, color: color),
           const SizedBox(width: 10),
-          Expanded(child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: Theme.of(c).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-              Text(subtitle, style: Theme.of(c).textTheme.bodySmall?.copyWith(
-                color: Theme.of(c).colorScheme.onSurface.withOpacity(0.65))),
-            ],
-          )),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(c).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                Text(subtitle, style: Theme.of(c).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(c).colorScheme.onSurface.withOpacity(0.65),
+                )),
+              ],
+            ),
+          ),
           Container(
             padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
             decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(999)),
@@ -59,7 +62,7 @@ class TasksSection extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildList(BuildContext context, List items, {bool completed = false}) {
+  List<Widget> _buildList(BuildContext context, List items, {required bool strikeThroughWhenCompleted}) {
     if (items.isEmpty) {
       return [Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -74,21 +77,19 @@ class TasksSection extends StatelessWidget {
         final t = items[i];
         return TaskTile(
           task: t,
+          strikeThroughWhenCompleted: strikeThroughWhenCompleted,
           onToggle: () {
-            final all = ctrl.all;
-            final idx = all.indexOf(t);
+            final idx = ctrl.all.indexOf(t);
             if (idx != -1) ctrl.toggleCompleted(idx);
           },
           onEdit: () async {
-            final all = ctrl.all;
-            final idx = all.indexOf(t);
+            final idx = ctrl.all.indexOf(t);
             if (idx == -1) return;
             final edited = await TaskEditorDialog.show(context, initial: t);
             if (edited != null) ctrl.update(idx, edited);
           },
           onDelete: () {
-            final all = ctrl.all;
-            final idx = all.indexOf(t);
+            final idx = ctrl.all.indexOf(t);
             if (idx != -1) ctrl.removeAt(idx);
           },
         );
