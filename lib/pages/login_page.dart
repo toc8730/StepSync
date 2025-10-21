@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'create_account_page.dart';
+import 'homepage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:my_app/pages/homepage.dart';
 import 'package:my_app/pages/create_account_page.dart';
 
@@ -14,6 +18,8 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
   bool _obscure = true;
   bool _canSignIn = false;
+
+  final String apiUrl = "http://127.0.0.1:5000/login"; // For emulator
 
   @override
   void initState() {
@@ -54,9 +60,21 @@ class _LoginPageState extends State<LoginPage> {
       );
       return;
     }
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomePage()),
-    );
+
+    http.post(
+      Uri.parse(apiUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'username': _usernameController.text.trim(), 'password': _passwordController.text.trim()}),
+    ).then((res){
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => HomePage(username: _usernameController.text.trim(), token: data['token'],)),
+        );
+        
+      }
+    });
   }
 
   @override

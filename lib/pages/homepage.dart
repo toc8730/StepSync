@@ -1,5 +1,7 @@
 // lib/pages/home_page.dart
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 import '../task_controller.dart';
 import '../widgets/tasks_section.dart';
@@ -12,7 +14,10 @@ import 'login_page.dart';
 import 'profile_page.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final String username;
+  final String token;
+  const HomePage({super.key, required this.username, required this.token});
+  const HomePage({super.key}); //test if this is necessary
 
   @override
   State<HomePage> createState() => _HomePageState();
