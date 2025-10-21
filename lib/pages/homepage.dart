@@ -1,147 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../task_controller.dart';
+import '../widgets/tasks_section.dart';
+import '../widgets/task_editor_dialog.dart';
+import '../models/task.dart';
+import 'login_page.dart';
+import 'profile_page.dart';
 
 class HomePage extends StatefulWidget {
   final String username;
   final String token;
   const HomePage({super.key, required this.username, required this.token});
-
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  // List to store schedule blocks
-  List<Map<String, String>> blocks = [];
+  late final TaskController _ctrl;
 
-  final _titleController = TextEditingController();
-  final _timeController = TextEditingController();
-  final _descController = TextEditingController();
-
-  // Regex to enforce HH:MM-HH:MM format
-  final RegExp timeRegExp = RegExp(
-    r'^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$',
-  );
-
-  void loadBlocks(String token, BuildContext context) {
-    http.get(
-      Uri.parse("http://127.0.0.1:5000/profile"), 
-      headers: {'Authorization': 'Bearer $token'}
-    ).then((res){
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-
-        setState(() {
-          blocks = List<Map<String, String>>.from(
-            (data['schedule_blocks'] ?? []).map((b) => Map<String, String>.from(b)),
-          );
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.body)),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.body)),
-        );
-      }
-    });
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TaskController();
   }
 
-@override
-void initState() {
-  super.initState();
-  loadBlocks(widget.token, context);
-}
-
-
-  void _showCreateBlockDialog() {
-    _titleController.clear();
-    _timeController.clear();
-    _descController.clear();
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Create Block'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _titleController,
-                decoration: const InputDecoration(labelText: 'Title'),
-              ),
-              TextField(
-                controller: _timeController,
-                decoration: const InputDecoration(
-                  labelText: 'Time (HH:MM-HH:MM)',
-                ),
-              ),
-              TextField(
-                controller: _descController,
-                decoration: const InputDecoration(labelText: 'Description'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final title = _titleController.text.trim();
-                final time = _timeController.text.trim();
-                final desc = _descController.text.trim();
-
-                if (title.isEmpty || time.isEmpty || desc.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('All fields are required')),
-                  );
-                  return;
-                }
-
-                if (!timeRegExp.hasMatch(time)) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Time must be HH:MM-HH:MM')),
-                  );
-                  return;
-                }
-
-                String token = widget.token;
-
-                http.post(
-                  Uri.parse("http://127.0.0.1:5000/profile/block"), 
-                  headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-                  body: json.encode({'block': {'title': title, 'time': time, 'desc': desc}})
-                );
-
-                setState(() {
-                  blocks.add({'title': title, 'time': time, 'desc': desc});
-                  // Sort by start time
-                  blocks.sort((a, b) {
-                    final startA = a['time']!.split('-')[0];
-                    final startB = b['time']!.split('-')[0];
-                    return startA.compareTo(startB);
-                  });
-                });
-
-                Navigator.pop(context);
-              },
-              child: const Text('Create'),
-            ),
-          ],
+  void _onMenu(String value) {
+    switch (value) {
+      case 'profile':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ProfilePage()),
         );
-      },
-    );
+        break;
+      case 'signout':
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
+        break;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+<<<<<<< HEAD
         automaticallyImplyLeading: false,
         title: Text('Welcome, ${widget.username}!'),
         actions: [
@@ -209,3 +113,30 @@ void initState() {
     );
   }
 }
+=======
+        title: const Text("Home"),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: _onMenu,
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'profile', child: Text('Profile')),
+              PopupMenuItem(value: 'signout', child: Text('Sign out')),
+            ],
+          ),
+        ],
+      ),
+      body: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (_, __) => TasksSection(ctrl: _ctrl),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          final Task? task = await TaskEditorDialog.show(context);
+          if (task != null) _ctrl.add(task);
+        },
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+>>>>>>> b502ed451c2e7f9a2688f5781e0f70bcb499c0c3
