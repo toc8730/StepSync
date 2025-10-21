@@ -20,18 +20,15 @@ class TaskEditorDialog extends StatefulWidget {
 class _TaskEditorDialogState extends State<TaskEditorDialog> {
   final _formKey = GlobalKey<FormState>();
 
-  // Controllers
   late final TextEditingController _titleCtrl;
   late final TextEditingController _startCtrl;
   late final TextEditingController _endCtrl;
   final TextEditingController _stepCtrl = TextEditingController();
 
-  // State
   String _period = 'AM';
   List<String> _steps = [''];
   int _currentStep = 0;
 
-  // Strict time regex: H:MM or HH:MM — hours 1..12, minutes 00..59
   final RegExp _timeRe = RegExp(r'^(?:[1-9]|1[0-2]):[0-5][0-9]$');
 
   @override
@@ -60,7 +57,6 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
     super.dispose();
   }
 
-  // -------- Validation
   String? _timeValidator(String? value) {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return null; // optional
@@ -70,7 +66,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
 
   bool _isValidTime(String? v) => (v != null && v.trim().isNotEmpty && _timeRe.hasMatch(v.trim()));
 
-  // -------- Time preview with robust AM/PM inference
+  // Preview: flip AM/PM ONLY if interval crosses 12:00 (same logic as tile)
   String _displayTimePreview() {
     final start = _startCtrl.text.trim();
     final end   = _endCtrl.text.trim();
@@ -85,48 +81,49 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
 
     final period = _period.trim().toUpperCase();
 
-    String fmtCore(String hhmm) {
+    String fmt(String hhmm) {
       final parts = hhmm.split(':');
-      final h = int.parse(parts[0]);           // 1..12
-      final mm = parts[1].padLeft(2, '0');     // 00..59
-      return (mm == '00') ? '$h' : '$h:$mm';   // drop :00
+      final h = int.parse(parts[0]);
+      final mm = parts[1].padLeft(2, '0');
+      return (mm == '00') ? '$h' : '$h:$mm';
     }
     String lower(String p) => p.toLowerCase();
 
+    int to24(String hhmm, String period) {
+      final parts = hhmm.split(':');
+      final h12 = int.parse(parts[0]) % 12;
+      final mm = int.parse(parts[1]);
+      final add = (period == 'PM') ? 12 : 0;
+      return (h12 + add) * 60 + mm;
+    }
+
     if (hasStart && !hasEnd) {
-      return period.isEmpty ? fmtCore(start) : '${fmtCore(start)} ${lower(period)}';
+      return '${fmt(start)} ${lower(period)}';
     }
     if (!hasStart && hasEnd) {
-      return period.isEmpty ? fmtCore(end) : '${fmtCore(end)} ${lower(period)}';
+      return '${fmt(end)} ${lower(period)}';
     }
 
-    // both present, valid
-    final sHour = int.parse(start.split(':')[0]); // 1..12
-    final eHour = int.parse(end.split(':')[0]);   // 1..12
-    String endPeriod = period;
+    // both present
+    final s24 = to24(start, period);
 
-    if (period == 'AM') {
-      if (eHour == 12) {
-        endPeriod = 'PM';
-      } else if (eHour < sHour) {
-        endPeriod = 'PM';
-      }
-    }
+    final endSame24 = to24(end, period);
+    final sameForward = endSame24 >= s24;
 
-    if (period == 'PM') {
-      if (eHour == 12) {
-        endPeriod = 'AM';
-      } else if (eHour < sHour) {
-        endPeriod = 'AM';
-      }
-    }
+    final flipped = (period == 'AM') ? 'PM' : 'AM';
+    final endFlip24 = to24(end, flipped);
+    final flipForward = endFlip24 >= s24;
 
-    final left  = period.isEmpty ? fmtCore(start) : '${fmtCore(start)} ${lower(period)}';
-    final right = endPeriod.isEmpty ? fmtCore(end) : '${fmtCore(end)} ${lower(endPeriod)}';
+    final endPeriod = sameForward
+        ? period
+        : (flipForward ? flipped : period);
+
+    final left  = '${fmt(start)} ${lower(period)}';
+    final right = '${fmt(end)} ${lower(endPeriod)}';
     return '$left – $right';
   }
 
-  // -------- Steps (no add/remove; Next only if current not empty; prune on save)
+  // Steps logic unchanged
   bool get _currentStepEmpty => _stepCtrl.text.trim().isEmpty;
 
   void _goPrev() {

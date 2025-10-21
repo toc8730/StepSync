@@ -30,7 +30,6 @@ class _TaskTileState extends State<TaskTile> {
     final applyStrike = widget.strikeThroughWhenCompleted && t.completed;
     final hasSteps = t.steps.any((s) => s.trim().isNotEmpty);
 
-    // Right-side controls + chevron
     final trailingControls = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -63,7 +62,7 @@ class _TaskTileState extends State<TaskTile> {
           message: _expanded ? 'Collapse' : 'Expand',
           child: AnimatedRotation(
             duration: const Duration(milliseconds: 200),
-            turns: _expanded ? 0.5 : 0.0, // rotate chevron when expanded
+            turns: _expanded ? 0.5 : 0.0,
             child: const Icon(Icons.expand_more),
           ),
         ),
@@ -73,14 +72,11 @@ class _TaskTileState extends State<TaskTile> {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: Theme(
-        // Remove default trailing chevron spacing from ExpansionTile
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           initiallyExpanded: false,
           onExpansionChanged: (v) => setState(() => _expanded = v),
-          // We'll supply our own trailing (buttons + chevron)
           trailing: trailingControls,
-          // We move the complete toggle to the right; no leading icon.
           tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
 
@@ -117,8 +113,7 @@ class _TaskTileState extends State<TaskTile> {
     );
   }
 
-  // Display like "11:45 pm – 12:15 am" with robust end-period inference,
-  // including the 11 → 12 boundary you flagged.
+  // Flip AM/PM ONLY if the interval crosses 12:00.
   String _formatDisplayTime(Task t) {
     final start = t.startTime?.trim();
     final end   = t.endTime?.trim();
@@ -139,6 +134,14 @@ class _TaskTileState extends State<TaskTile> {
       return (mm == '00') ? '$h' : '$h:$mm';
     }
 
+    int _to24(String hhmm, String period) {
+      final parts = hhmm.split(':');
+      final h12 = int.parse(parts[0]) % 12; // 12 -> 0
+      final mm = int.parse(parts[1]);
+      final add = (period == 'PM') ? 12 : 0;
+      return (h12 + add) * 60 + mm; // minutes since midnight
+    }
+
     if (!_valid(start) && !_valid(end)) return '';
     if (_valid(start) && !_valid(end)) {
       if (startPeriod.isEmpty) return _fmt(start!);
@@ -150,35 +153,24 @@ class _TaskTileState extends State<TaskTile> {
     }
 
     // both valid
-    final sHour = int.parse(start!.split(':')[0]); // 1..12
-    final eHour = int.parse(end!.split(':')[0]);   // 1..12
-    String endPeriod = startPeriod;
+    final s24 = _to24(start!, startPeriod);
 
-    // Robust period inference:
-    // AM case:
-    //  - if end hour == 12, it flips to PM (e.g., 11:30 AM -> 12:15 PM)
-    //  - else if end hour < start hour, it also flips to PM (e.g., 10:30 AM -> 9:45 PM is unusual but respected)
-    if (startPeriod == 'AM') {
-      if (eHour == 12) {
-        endPeriod = 'PM';
-      } else if (eHour < sHour) {
-        endPeriod = 'PM';
-      }
-    }
+    // Candidate 1: keep same period for end
+    final endSame24 = _to24(end!, startPeriod);
+    final sameForward = endSame24 >= s24;
 
-    // PM case:
-    //  - if end hour == 12, it flips to AM (crossing midnight: 11:45 PM -> 12:15 AM)
-    //  - else if end hour < start hour, also flips to AM (e.g., 10:30 PM -> 1:00 AM)
-    if (startPeriod == 'PM') {
-      if (eHour == 12) {
-        endPeriod = 'AM';
-      } else if (eHour < sHour) {
-        endPeriod = 'AM';
-      }
-    }
+    // Candidate 2: flip end period (AM <-> PM)
+    final flipped = (startPeriod == 'AM') ? 'PM' : 'AM';
+    final endFlip24 = _to24(end, flipped);
+    final flipForward = endFlip24 >= s24;
 
-    final left  = startPeriod.isEmpty ? _fmt(start) : '${_fmt(start)} ${_lower(startPeriod)}';
-    final right = endPeriod.isEmpty   ? _fmt(end)   : '${_fmt(end)} ${_lower(endPeriod)}';
+    // Choose: prefer same-period if it's forward; otherwise flip if forward; else fall back to same.
+    final endPeriod = sameForward
+        ? startPeriod
+        : (flipForward ? flipped : startPeriod);
+
+    final left  = '${_fmt(start)} ${_lower(startPeriod)}';
+    final right = '${_fmt(end)} ${_lower(endPeriod)}';
     return '$left – $right';
   }
 }

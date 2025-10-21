@@ -1,54 +1,34 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
 import 'pages/homepage.dart';
 import 'pages/create_account_page.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 
-import 'firebase_background.dart';          // <-- moved here (not in pages/)
-import 'services/push_notifications.dart';
+// Your firebase_options.dart is inside /lib/pages in this project.
+import 'firebase_options.dart';
+
+// Start screen — change if you want a different entry.
 import 'pages/login_page.dart';
-// Optional: if you used `flutterfire configure`, prefer:
-// import 'firebase_options.dart';
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Catch any init-time crashes and still render a screen
-  FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-    debugPrint('FlutterError: ${details.exception}\n${details.stack}');
-  };
-
+void main() {
+  // Keep ensureInitialized and runApp in the SAME zone.
   runZonedGuarded(() async {
-    String? initError;
+    WidgetsFlutterBinding.ensureInitialized();
 
-    try {
-      // If you have firebase_options.dart, use:
-      // await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-      await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
-      // Register the background handler AFTER Firebase is ready
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-
-      // Init local + foreground notifications and FCM listeners
-      await PushNotifications.init();
-    } catch (e, st) {
-      initError = e.toString();
-      debugPrint('Init error: $e\n$st');
-    }
-
-    runApp(MyApp(initError: initError));
+    runApp(const MyApp());
   }, (error, stack) {
-    debugPrint('Uncaught zone error: $error\n$stack');
+    // Optional: send errors to your logger/crash reporter
+    // debugPrint('Uncaught zone error: $error\n$stack');
   });
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key, this.initError});
-  final String? initError;
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -56,49 +36,10 @@ class MyApp extends StatelessWidget {
       title: 'My App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: initError == null
-          ? const LoginPage()
-          : InitErrorScreen(error: initError!),
-    );
-  }
-}
-
-class InitErrorScreen extends StatelessWidget {
-  const InitErrorScreen({super.key, required this.error});
-  final String error;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.error_outline, size: 48),
-                const SizedBox(height: 12),
-                const Text(
-                  'Initialization error',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  error,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(.7),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      home: const LoginPage(),
     );
   }
 }
