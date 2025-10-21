@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/task.dart';
+import 'media_picker.dart';
+
 
 class TaskEditorDialog extends StatefulWidget {
   const TaskEditorDialog({super.key, this.initial});
@@ -27,10 +29,11 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
 
   String _period = 'AM';
   List<String> _steps = [''];
+  List<PickedImage> _stepImages = [];
   int _currentStep = 0;
 
   final RegExp _timeRe = RegExp(r'^(?:[1-9]|1[0-2]):[0-5][0-9]$');
-
+  
   @override
   void initState() {
     super.initState();
@@ -209,6 +212,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
               const SizedBox(height: 8),
 
               Row(
+                
                 children: [
                   Expanded(
                     child: TextFormField(
@@ -252,6 +256,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
               const SizedBox(height: 12),
 
               Row(
+                
                 children: [
                   IconButton(
                     tooltip: 'Previous step',
@@ -283,6 +288,11 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
                 decoration: const InputDecoration(labelText: 'Step text'),
                 onChanged: (v) => _steps[_currentStep] = v,
                 maxLines: null,
+              ),
+              const SizedBox(height: 16),
+              MediaPicker(
+                label: 'Attach Step Images',
+                onChanged: (imgs) => _stepImages = imgs,
               ),
             ],
           ),
