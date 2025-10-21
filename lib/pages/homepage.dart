@@ -45,75 +45,6 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-<<<<<<< HEAD
-        automaticallyImplyLeading: false,
-        title: Text('Welcome, ${widget.username}!'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              String token = widget.token;
-              if (value == 'profile') {
-                http.get(
-                  Uri.parse('http://127.0.0.1:5000/profile'),
-                  headers: {'Authorization': 'Bearer $token'},
-                ).then((res){
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(res.body)),
-                  );
-                });
-              } else if (value == 'signout') {
-                Navigator.pop(context);
-              }
-            },
-            itemBuilder: (BuildContext context) => [
-              const PopupMenuItem(value: 'profile', child: Text('Profile')),
-              const PopupMenuItem(value: 'signout', child: Text('Sign Out')),
-            ],
-            icon: Row(
-              children: [
-                Text(
-                  widget.username,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const Icon(Icons.arrow_drop_down),
-              ],
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showCreateBlockDialog,
-        child: const Icon(Icons.add),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: blocks.isEmpty
-            ? const Center(child: Text('No blocks created yet.'))
-            : ListView.builder(
-                itemCount: blocks.length,
-                itemBuilder: (context, index) {
-                  final block = blocks[index];
-                  return Card(
-                    child: ExpansionTile(
-                      title: Text('${block['time']} - ${block['title']}'),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Text(block['desc']!),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-      ),
-    );
-  }
-}
-=======
         title: const Text("Home"),
         actions: [
           PopupMenuButton<String>(
@@ -139,4 +70,3 @@ class _HomePageState extends State<HomePage> {
     );
   }
 }
->>>>>>> b502ed451c2e7f9a2688f5781e0f70bcb499c0c3

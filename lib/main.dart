@@ -1,14 +1,11 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-<<<<<<< HEAD
 import 'pages/login_page.dart';
 import 'pages/homepage.dart';
 import 'pages/create_account_page.dart';
-=======
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
->>>>>>> b502ed451c2e7f9a2688f5781e0f70bcb499c0c3
 
 import 'firebase_background.dart';          // <-- moved here (not in pages/)
 import 'services/push_notifications.dart';
