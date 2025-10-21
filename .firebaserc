@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "default": "scheduling-app-f97d9",
+    "capp": "scheduling-app-f97d9",
+    "vergem": "scheduling-app-f97d9"
+  },
+  "targets": {},
+  "etags": {}
+}
