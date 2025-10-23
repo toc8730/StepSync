@@ -31,6 +31,16 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _ctrl = TaskController();
+
+    http.get(
+      Uri.parse('http://127.0.0.1:5000/profile'),
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ${AppGlobals.token}' }
+    ).then((res){
+      dynamic schedule_blocks = json.decode(res.body)['schedule_blocks'];
+      for (dynamic block in schedule_blocks) {
+        _ctrl.load(Task(title: block['title'], startTime: block['startTime'], endTime: block['endTime'], period: block['period'], hidden: block['hidden'], completed: block['completed']));
+      }
+    });
   }
 
   Future<void> _handleMenuSelect(String value) async {

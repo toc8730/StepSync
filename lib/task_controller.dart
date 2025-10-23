@@ -26,6 +26,13 @@ class TaskController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // add without saving to database
+  void load(Task t) {
+    _tasks.add(t);
+    _scheduleFor(t);
+    notifyListeners();
+  }
+
   void update(int index, Task t) {
     final old = _tasks[index];
 
