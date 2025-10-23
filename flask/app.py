@@ -76,7 +76,7 @@ def profile_get():
 # Appends schedule data with new block
 @app.route ('/profile/block/add', methods=['POST'])
 @jwt_required()
-def profile_post():
+def block_add():
     current_user = get_jwt_identity()
     user = User.query.filter_by(username=current_user).first()
     profile_data = json.JSONDecoder().decode(user.profile_data)
@@ -91,9 +91,29 @@ def profile_post():
     # save the change to database
     user.profile_data = json.JSONEncoder().encode(profile_data)
     db.session.commit()
-    return jsonify({'message': 'Block post successful'})
+    return jsonify({'message': 'Block add successful'})
 
-#TODO: ADD BLOCK EDIT FEATURE
+# Edits existing schedule block
+@app.route ('/profile/block/edit', methods=['POST'])
+@jwt_required()
+def block_edit():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    profile_data = json.JSONDecoder().decode(user.profile_data)
+    
+
+    old_block = request.get_json()['old_block']
+    new_block = request.get_json()['new_block']
+
+    schedule_blocks = profile_data['schedule_blocks']
+    schedule_blocks[schedule_blocks.index(old_block)] = new_block
+
+    # save the change to database
+    user.profile_data = json.JSONEncoder().encode(profile_data)
+    db.session.commit()
+    return jsonify({'message': 'Block edit successful'})
+
+
     
 
 if __name__ == '__main__':

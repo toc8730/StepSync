@@ -28,6 +28,14 @@ class TaskController extends ChangeNotifier {
 
   void update(int index, Task t) {
     final old = _tasks[index];
+
+    http.post(
+      Uri.parse("http://127.0.0.1:5000/profile/block/edit"),
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ${AppGlobals.token}'},
+      body: json.encode({'old_block':{'title':old.title,'startTime':old.startTime,'endTime':old.endTime,'period':old.period,'hidden':old.hidden,'completed':old.completed},
+                        'new_block':{'title':t.title,'startTime':t.startTime,'endTime':t.endTime,'period':t.period,'hidden':t.hidden,'completed':t.completed}})
+    );
+
     _cancelFor(old);
     _tasks[index] = t;
     _scheduleFor(t);
