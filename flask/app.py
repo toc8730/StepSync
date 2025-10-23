@@ -22,6 +22,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
+    account_type = db.Column(db.Text, nullable=False)
     profile_data = db.Column(db.Text) # text is just string w/o chr limit
 
 with app.app_context():
@@ -33,6 +34,7 @@ def register():
     data = request.get_json()
     username = data['username']
     password = data['password']
+    account_type = data['account_type']
 
     default_profile_data = json.JSONEncoder().encode({'schedule_blocks': ''}) # change this later
 
@@ -42,7 +44,7 @@ def register():
 
     # Hash the password
     hashed_pw = generate_password_hash(password)
-    new_user = User(username=username, password=hashed_pw, profile_data=default_profile_data)
+    new_user = User(username=username, password=hashed_pw, profile_data=default_profile_data, account_type=account_type)
     db.session.add(new_user)
     db.session.commit()
 
