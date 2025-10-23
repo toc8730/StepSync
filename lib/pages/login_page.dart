@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:my_app/data/globals.dart';
 import 'create_account_page.dart';
 import 'homepage.dart';
 import 'package:http/http.dart' as http;
@@ -68,7 +69,7 @@ class _LoginPageState extends State<LoginPage> {
     ).then((res){
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
-
+        AppGlobals.token = data['token'];
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => HomePage(username: _usernameController.text.trim(), token: data['token'],)),
         );

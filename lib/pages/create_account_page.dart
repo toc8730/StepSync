@@ -19,7 +19,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     return http.post(
       Uri.parse(apiUrl),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'username': username, 'password': password}),
+      body: json.encode({'username': username, 'password': password, 'account_type': _accountType}),
     );
   }
 

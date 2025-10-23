@@ -22,6 +22,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
+    account_type = db.Column(db.Text, nullable=False)
     profile_data = db.Column(db.Text) # text is just string w/o chr limit
 
 with app.app_context():
@@ -33,6 +34,7 @@ def register():
     data = request.get_json()
     username = data['username']
     password = data['password']
+    account_type = data['account_type']
 
     default_profile_data = json.JSONEncoder().encode({'schedule_blocks': ''}) # change this later
 
@@ -42,7 +44,7 @@ def register():
 
     # Hash the password
     hashed_pw = generate_password_hash(password)
-    new_user = User(username=username, password=hashed_pw, profile_data=default_profile_data)
+    new_user = User(username=username, password=hashed_pw, profile_data=default_profile_data, account_type=account_type)
     db.session.add(new_user)
     db.session.commit()
 
@@ -74,9 +76,9 @@ def profile_get():
     return user.profile_data
 
 # Appends schedule data with new block
-@app.route ('/profile/block', methods=['POST'])
+@app.route ('/profile/block/add', methods=['POST'])
 @jwt_required()
-def profile_post():
+def block_add():
     current_user = get_jwt_identity()
     user = User.query.filter_by(username=current_user).first()
     profile_data = json.JSONDecoder().decode(user.profile_data)
@@ -91,7 +93,29 @@ def profile_post():
     # save the change to database
     user.profile_data = json.JSONEncoder().encode(profile_data)
     db.session.commit()
-    return jsonify({'message': 'Block post successful'})
+    return jsonify({'message': 'Block add successful'})
+
+# Edits existing schedule block
+@app.route ('/profile/block/edit', methods=['POST'])
+@jwt_required()
+def block_edit():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    profile_data = json.JSONDecoder().decode(user.profile_data)
+    
+
+    old_block = request.get_json()['old_block']
+    new_block = request.get_json()['new_block']
+
+    schedule_blocks = profile_data['schedule_blocks']
+    schedule_blocks[schedule_blocks.index(old_block)] = new_block
+
+    # save the change to database
+    user.profile_data = json.JSONEncoder().encode(profile_data)
+    db.session.commit()
+    return jsonify({'message': 'Block edit successful'})
+
+
     
 
 if __name__ == '__main__':
