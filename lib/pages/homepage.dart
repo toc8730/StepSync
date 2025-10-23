@@ -1,6 +1,7 @@
 // lib/pages/home_page.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:my_app/data/globals.dart';
 import 'dart:convert';
 
 import '../task_controller.dart';
@@ -17,7 +18,7 @@ class HomePage extends StatefulWidget {
   final String username;
   final String token;
   const HomePage({super.key, required this.username, required this.token});
-  const HomePage({super.key}); //test if this is necessary
+  //const HomePage({super.key}); //test if this is necessary
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -52,6 +53,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _addTask() async {
     final Task? task = await TaskEditorDialog.show(context);
+
+    
     if (task != null && mounted) {
       setState(() => _ctrl.add(task));
       _snack('Task added');

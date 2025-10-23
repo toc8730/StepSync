@@ -74,7 +74,7 @@ def profile_get():
     return user.profile_data
 
 # Appends schedule data with new block
-@app.route ('/profile/block', methods=['POST'])
+@app.route ('/profile/block/add', methods=['POST'])
 @jwt_required()
 def profile_post():
     current_user = get_jwt_identity()
@@ -92,6 +92,8 @@ def profile_post():
     user.profile_data = json.JSONEncoder().encode(profile_data)
     db.session.commit()
     return jsonify({'message': 'Block post successful'})
+
+#TODO: ADD BLOCK EDIT FEATURE
     
 
 if __name__ == '__main__':
