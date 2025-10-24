@@ -36,8 +36,8 @@ class _HomePageState extends State<HomePage> {
       Uri.parse('http://127.0.0.1:5000/profile'),
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ${AppGlobals.token}' }
     ).then((res){
-      dynamic schedule_blocks = json.decode(res.body)['schedule_blocks'];
-      for (dynamic block in schedule_blocks) {
+      dynamic scheduleBlocks = json.decode(res.body)['schedule_blocks'];
+      for (dynamic block in scheduleBlocks) {
         _ctrl.load(Task(title: block['title'], startTime: block['startTime'], endTime: block['endTime'], period: block['period'], hidden: block['hidden'], completed: block['completed']));
       }
     });

@@ -388,22 +388,22 @@ class _TaskTileState extends State<TaskTile> {
     final end   = t.endTime?.trim();
     final startPeriod = (t.period ?? '').trim().toUpperCase();
 
-    bool _valid(String? hhmm) {
+    bool valid(String? hhmm) {
       if (hhmm == null || hhmm.isEmpty) return false;
       final re = RegExp(r'^(?:[1-9]|1[0-2]):[0-5][0-9]$');
       return re.hasMatch(hhmm);
     }
 
-    String _lower(String p) => p.toLowerCase();
+    String lower(String p) => p.toLowerCase();
 
-    String _fmt(String hhmm) {
+    String fmt(String hhmm) {
       final parts = hhmm.split(':');
       final h = int.parse(parts[0]);
       final mm = parts[1].padLeft(2, '0');
       return (mm == '00') ? '$h' : '$h:$mm';
     }
 
-    int _to24(String hhmm, String period) {
+    int to24(String hhmm, String period) {
       final parts = hhmm.split(':');
       final h12 = int.parse(parts[0]) % 12;
       final mm = int.parse(parts[1]);
@@ -411,26 +411,26 @@ class _TaskTileState extends State<TaskTile> {
       return (h12 + add) * 60 + mm;
     }
 
-    if (!_valid(start) && !_valid(end)) return '';
-    if (_valid(start) && !_valid(end)) {
-      if (startPeriod.isEmpty) return _fmt(start!);
-      return '${_fmt(start!)} ${_lower(startPeriod)}';
+    if (!valid(start) && !valid(end)) return '';
+    if (valid(start) && !valid(end)) {
+      if (startPeriod.isEmpty) return fmt(start!);
+      return '${fmt(start!)} ${lower(startPeriod)}';
     }
-    if (!_valid(start) && _valid(end)) {
-      if (startPeriod.isEmpty) return _fmt(end!);
-      return '${_fmt(end!)} ${_lower(startPeriod)}';
+    if (!valid(start) && valid(end)) {
+      if (startPeriod.isEmpty) return fmt(end!);
+      return '${fmt(end!)} ${lower(startPeriod)}';
     }
 
-    final s24 = _to24(start!, startPeriod);
-    final endSame24 = _to24(end!, startPeriod);
+    final s24 = to24(start!, startPeriod);
+    final endSame24 = to24(end!, startPeriod);
     final sameForward = endSame24 >= s24;
     final flipped = (startPeriod == 'AM') ? 'PM' : 'AM';
-    final endFlip24 = _to24(end, flipped);
+    final endFlip24 = to24(end, flipped);
     final flipForward = endFlip24 >= s24;
     final endPeriod = sameForward ? startPeriod : (flipForward ? flipped : startPeriod);
 
-    final left  = '${_fmt(start)} ${_lower(startPeriod)}';
-    final right = '${_fmt(end)} ${_lower(endPeriod)}';
+    final left  = '${fmt(start)} ${lower(startPeriod)}';
+    final right = '${fmt(end)} ${lower(endPeriod)}';
     return '$left – $right';
   }
 }

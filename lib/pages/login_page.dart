@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:my_app/data/globals.dart';
-import 'create_account_page.dart';
-import 'homepage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:my_app/pages/homepage.dart';
-import 'package:my_app/pages/create_account_page.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'homepage.dart';
+import 'create_account_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -17,15 +15,16 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+
   bool _obscure = true;
   bool _canSignIn = false;
 
-  final String apiUrl = "http://127.0.0.1:5000/login"; // For emulator
+  final String apiUrl = "http://127.0.0.1:5000/login"; // Adjust if using physical device
 
   @override
   void initState() {
     super.initState();
-    // Enable Sign In only when both fields are non-empty
     _usernameController.addListener(_refreshCanSignIn);
     _passwordController.addListener(_refreshCanSignIn);
   }
@@ -47,14 +46,12 @@ class _LoginPageState extends State<LoginPage> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CreateAccountPage()),
     );
-    // Clear inputs when returning from Create Account
     _usernameController.clear();
     _passwordController.clear();
     _refreshCanSignIn();
   }
 
-  void _signIn() {
-    // Guard (belt & suspenders)
+  Future<void> _signIn() async {
     if (!_canSignIn) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter your username and password.')),
@@ -62,20 +59,43 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    http.post(
-      Uri.parse(apiUrl),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({'username': _usernameController.text.trim(), 'password': _passwordController.text.trim()}),
-    ).then((res){
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        AppGlobals.token = data['token'];
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'username': _usernameController.text.trim(),
+          'password': _passwordController.text.trim(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final token = data['token'];
+
+        // Save token securely
+        await _secureStorage.write(key: 'jwt_token', value: token);
+        print('Token saved: $token');
+
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HomePage(username: _usernameController.text.trim(), token: data['token'],)),
+          MaterialPageRoute(
+            builder: (_) => HomePage(
+              username: _usernameController.text.trim(),
+              token: token,
+            ),
+          ),
         );
-        
+      } else {
+        final error = json.decode(response.body)['error'] ?? 'Login failed';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $error')),
+        );
       }
-    });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Network error: $e')),
+      );
+    }
   }
 
   @override

@@ -1,5 +1,8 @@
 import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class CreateFamilyPage extends StatefulWidget {
   const CreateFamilyPage({super.key});
@@ -10,13 +13,12 @@ class CreateFamilyPage extends StatefulWidget {
 
 class _CreateFamilyPageState extends State<CreateFamilyPage> {
   final _formKey = GlobalKey<FormState>();
-
   final _nameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
-
-  // Password visibility: DEFAULT = hidden (viewing OFF)
   bool _passwordVisible = false;
+
+  final _storage = const FlutterSecureStorage(); // for JWT token
 
   @override
   void dispose() {
@@ -26,7 +28,6 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
     super.dispose();
   }
 
-  // Name: 1..16
   String? _nameValidator(String? v) {
     final s = (v ?? '').trim();
     if (s.isEmpty) return 'Family name is required';
@@ -34,7 +35,6 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
     return null;
   }
 
-  // Password rules: 8..20, letters+numbers
   final RegExp _hasLetter = RegExp(r'[A-Za-z]');
   final RegExp _hasDigit = RegExp(r'\d');
 
@@ -56,41 +56,73 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
   }
 
   String _generateFamilyId() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0,1,O,I
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     final rnd = Random.secure();
     final code = List.generate(6, (_) => chars[rnd.nextInt(chars.length)]).join();
     return 'FAM-$code';
   }
 
   Future<void> _createFamily() async {
-    if (!_formKey.currentState!.validate()) return;
+  print('Create button tapped');
 
-    final familyId = _generateFamilyId();
+  if (!_formKey.currentState!.validate()) {
+    print('Validation failed');
+    return;
+  }
 
-    await showDialog(
+  final familyId = _generateFamilyId();
+  final token = await _storage.read(key: 'jwt_token');
+  print('Token: $token');
+
+  if (token == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Missing token. Please log in again.')),
+    );
+    return;
+  }
+
+  print('Sending request to backend...');
+  final response = await http.post(
+    Uri.parse('http://127.0.0.1:5000/family/create'),
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    },
+    body: jsonEncode({
+      'name': _nameCtrl.text.trim(),
+      'password': _passwordCtrl.text,
+      'family_id': familyId,
+    }),
+  );
+
+  print('Response status: ${response.statusCode}');
+  print('Response body: ${response.body}');
+
+  if (response.statusCode == 200) {
+    final data = jsonDecode(response.body);
+    final createdFamilyId = data['family_id'];
+
+    showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Family Created'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Name: ${_nameCtrl.text.trim()}'),
-            const SizedBox(height: 8),
-            Text('Family ID: $familyId', style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            const Text('Share this ID with family members so they can join.'),
-          ],
-        ),
+        content: Text('Your Family ID is: $createdFamilyId'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
-
-    if (mounted) Navigator.pop(context);
+  } else {
+    final error = jsonDecode(response.body)['error'] ?? 'Unknown error';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error: $error')),
+    );
   }
-
+}
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -115,7 +147,7 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
                 const SizedBox(height: 14),
                 TextFormField(
                   controller: _passwordCtrl,
-                  obscureText: !_passwordVisible, // hidden by default
+                  obscureText: !_passwordVisible,
                   decoration: InputDecoration(
                     labelText: 'Family Password',
                     border: const OutlineInputBorder(),
@@ -129,7 +161,6 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
                   validator: _passwordValidator,
                 ),
                 const SizedBox(height: 14),
-                // Confirm: always obscured (no toggle)
                 TextFormField(
                   controller: _confirmCtrl,
                   obscureText: true,

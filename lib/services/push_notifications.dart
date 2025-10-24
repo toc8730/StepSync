@@ -1,5 +1,4 @@
 // lib/services/push_notifications.dart
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -167,7 +166,7 @@ class PushNotifications {
       start: startAtLocal,
     );
 
-    Future<void> _scheduleMinus(Duration delta, int salt) async {
+    Future<void> scheduleMinus(Duration delta, int salt) async {
       final when = startAtLocal.subtract(delta);
 
       // Skip if already past (give 2s buffer)
@@ -212,8 +211,8 @@ class PushNotifications {
       }
     }
 
-    await _scheduleMinus(const Duration(minutes: 5), 0x5);
-    await _scheduleMinus(const Duration(minutes: 1), 0x1);
+    await scheduleMinus(const Duration(minutes: 5), 0x5);
+    await scheduleMinus(const Duration(minutes: 1), 0x1);
   }
 
   /// Cancel the two reminders previously scheduled for [task] at [startAtLocal].

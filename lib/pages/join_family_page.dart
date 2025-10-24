@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class JoinFamilyPage extends StatefulWidget {
   const JoinFamilyPage({super.key});
@@ -9,10 +12,12 @@ class JoinFamilyPage extends StatefulWidget {
 
 class _JoinFamilyPageState extends State<JoinFamilyPage> {
   final _formKey = GlobalKey<FormState>();
-
   final _idCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _storage = const FlutterSecureStorage();
+
   bool _obscure = true;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -21,21 +26,43 @@ class _JoinFamilyPageState extends State<JoinFamilyPage> {
     super.dispose();
   }
 
-  // For join: simply require both fields to be filled (no format/length messages)
   String? _required(String? v, String label) {
     final s = (v ?? '').trim();
     if (s.isEmpty) return '$label is required';
     return null;
   }
 
-  void _join() {
+  Future<void> _joinFamily() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // In the future, backend will validate ID/password.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Attempting to join family...')),
+    setState(() => _isLoading = true);
+    final token = await _storage.read(key: 'jwt_token');
+
+    final response = await http.post(
+      Uri.parse('http://127.0.0.1:5000/family/join'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'family_id': _idCtrl.text.trim(),
+        'password': _passwordCtrl.text,
+      }),
     );
-    Navigator.pop(context);
+
+    setState(() => _isLoading = false);
+
+    if (response.statusCode == 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Joined family successfully')),
+      );
+      if (mounted) Navigator.pop(context);
+    } else {
+      final error = jsonDecode(response.body)['error'] ?? 'Unknown error';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $error')),
+      );
+    }
   }
 
   @override
@@ -77,9 +104,9 @@ class _JoinFamilyPageState extends State<JoinFamilyPage> {
                   children: [
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _join,
+                        onPressed: _isLoading ? null : _joinFamily,
                         icon: const Icon(Icons.login),
-                        label: const Text('Join'),
+                        label: Text(_isLoading ? 'Joining...' : 'Join'),
                       ),
                     ),
                   ],
