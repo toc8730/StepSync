@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:my_app/data/globals.dart';
 import 'homepage.dart';
 import 'create_account_page.dart';
 
@@ -74,7 +75,7 @@ class _LoginPageState extends State<LoginPage> {
         final token = data['token'];
 
         // Save token securely
-        await _secureStorage.write(key: 'jwt_token', value: token);
+        AppGlobals.token = token;
         print('Token saved: $token');
 
         Navigator.of(context).pushReplacement(
