@@ -238,6 +238,7 @@ class TaskTile extends StatefulWidget {
     this.onDelete,
     this.strikeThroughWhenCompleted = true,
     this.stepsWithImages = const <TaskStep>[], // index-aligned to task.steps
+    this.onOpen,
   });
 
   final Task task;
@@ -248,6 +249,9 @@ class TaskTile extends StatefulWidget {
 
   /// Parallel data: images for each textual step.
   final List<TaskStep> stepsWithImages;
+
+   /// Tap to open detail page.
+  final VoidCallback? onOpen; 
 
   @override
   State<TaskTile> createState() => _TaskTileState();
@@ -289,6 +293,15 @@ class _TaskTileState extends State<TaskTile> {
             visualDensity: VisualDensity.compact,
           ),
         ),
+        if (widget.onOpen != null)
+          Tooltip(
+            message: 'Open details',
+            child: IconButton(
+              icon: const Icon(Icons.open_in_new),
+              onPressed: widget.onOpen,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
         const SizedBox(width: 6),
         Tooltip(
           message: _expanded ? 'Collapse' : 'Expand',
