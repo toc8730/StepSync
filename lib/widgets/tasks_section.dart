@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../task_controller.dart';
 import '../widgets/task_tile.dart';
 import '../widgets/task_editor_dialog.dart';
+import '../pages/task_detail_page.dart';
 
 class TasksSection extends StatelessWidget {
   const TasksSection({super.key, required this.ctrl});
@@ -91,6 +92,16 @@ class TasksSection extends StatelessWidget {
           onDelete: () {
             final idx = ctrl.all.indexOf(t);
             if (idx != -1) ctrl.removeAt(idx);
+          },
+          onOpen: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => TaskDetailPage(
+                  task: t,
+                  stepsWithImages: const [], // for now
+                ),
+              ),
+            );
           },
         );
       }),
