@@ -1,15 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
-import 'pages/homepage.dart';
-import 'pages/create_account_page.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 // Your firebase_options.dart is inside /lib/pages in this project.
 import 'firebase_options.dart';
 
 // Start screen — change if you want a different entry.
-import 'pages/login_page.dart';
 
 void main() {
   // Keep ensureInitialized and runApp in the SAME zone.

@@ -24,6 +24,15 @@ class User(db.Model):
     password = db.Column(db.String(200), nullable=False)
     account_type = db.Column(db.Text, nullable=False)
     profile_data = db.Column(db.Text) # text is just string w/o chr limit
+    family_id = db.Column(db.String(20), nullable=True)
+class Family(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    family_id = db.Column(db.String(20), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    password = db.Column(db.String(200), nullable=False)  # hashed
+    creator_username = db.Column(db.String(100), nullable=False)  # who created it
+    creator_username = db.Column(db.String)  # ← Add this
+
 
 with app.app_context():
     db.create_all()
@@ -76,7 +85,7 @@ def profile_get():
     return user.profile_data
 
 # Appends schedule data with new block
-@app.route ('/profile/block/add', methods=['POST'])
+@app.route('/profile/block/add', methods=['POST'])
 @jwt_required()
 def block_add():
     current_user = get_jwt_identity()
@@ -96,7 +105,7 @@ def block_add():
     return jsonify({'message': 'Block add successful'})
 
 # Edits existing schedule block
-@app.route ('/profile/block/edit', methods=['POST'])
+@app.route('/profile/block/edit', methods=['POST'])
 @jwt_required()
 def block_edit():
     current_user = get_jwt_identity()
@@ -115,8 +124,46 @@ def block_edit():
     db.session.commit()
     return jsonify({'message': 'Block edit successful'})
 
+@app.route('/family/create', methods=['POST'])
+@jwt_required()
+def create_family():
+    print("Create family route hit") 
+    data = request.get_json()
+    name = data['name']
+    password = data['password']
+    family_id = data['family_id']
 
-    
+    if Family.query.filter_by(family_id=family_id).first():
+        return jsonify({'error': 'Family ID already exists'}), 400
 
+    hashed_pw = generate_password_hash(password)
+    creator = get_jwt_identity()
+
+    new_family = Family(family_id=family_id, name=name, password=hashed_pw, creator_username=creator)
+    db.session.add(new_family)
+
+    # Optionally assign creator to family
+    user = User.query.filter_by(username=creator).first()
+    user.family_id = family_id
+
+    db.session.commit()
+    return({"message": "Family joined", "family_id": new_family.family_id})
+
+@app.route('/family/join', methods=['POST'])
+@jwt_required()
+def join_family():
+    data = request.get_json()
+    family_id = data['family_id']
+    password = data['password']
+
+    family = Family.query.filter_by(family_id=family_id).first()
+    if not family or not check_password_hash(family.password, password):
+        return jsonify({'error': 'Invalid family ID or password'}), 401
+
+    user = User.query.filter_by(username=get_jwt_identity()).first()
+    user.family_id = family_id
+    db.session.commit()
+
+    return jsonify({'message': 'Joined family successfully'})
 if __name__ == '__main__':
     app.run(debug=True)
