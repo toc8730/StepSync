@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:my_app/data/globals.dart';
 
 class CreateFamilyPage extends StatefulWidget {
   const CreateFamilyPage({super.key});
@@ -71,7 +72,7 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
   }
 
   final familyId = _generateFamilyId();
-  final token = await _storage.read(key: 'jwt_token');
+  final token = AppGlobals.token;
   print('Token: $token');
 
   if (token == null) {
