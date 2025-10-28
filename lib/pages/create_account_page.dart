@@ -1,7 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
-
 
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({super.key});
@@ -10,165 +9,148 @@ class CreateAccountPage extends StatefulWidget {
   State<CreateAccountPage> createState() => _CreateAccountPageState();
 }
 
+enum AccountType { parent, child }
+
 class _CreateAccountPageState extends State<CreateAccountPage> {
-  final String apiUrl = "http://127.0.0.1:5000/register"; // For emulator
+  final _username = TextEditingController();
+  final _password = TextEditingController();
+  final _confirm  = TextEditingController();
 
-  final bool passwordRequirements = false; // for testing
+  bool _showPass = false;
+  AccountType _type = AccountType.parent;
 
-  // api call to register user
-  Future<http.Response> addUser(String username, String password) async {
-    return http.post(
-      Uri.parse(apiUrl),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({'username': username, 'password': password, 'account_type': _accountType}),
-    );
+  static const _registerUrl = 'http://127.0.0.1:5000/register';
+
+  @override
+  void dispose() {
+    _username.dispose();
+    _password.dispose();
+    _confirm.dispose();
+    super.dispose();
   }
 
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmController = TextEditingController();
-  String _accountType = 'Parent';
-  bool _obscurePassword = true;
+  Future<void> _create() async {
+    final u = _username.text.trim();
+    final p = _password.text;
+    final c = _confirm.text;
+
+    if (u.isEmpty) {
+      _snack('Username required');
+      return;
+    }
+    if (p.length < 8 || p.length > 20) {
+      _snack('Password must be 8–20 characters.');
+      return;
+    }
+    if (p != c) {
+      _snack('Passwords do not match.');
+      return;
+    }
+
+    final payload = {
+      'username': u,
+      'password': p,
+      // IMPORTANT: send the exact key Flask expects
+      'type': _type == AccountType.child ? 'child' : 'parent',
+    };
+
+    try {
+      final res = await http.post(
+        Uri.parse(_registerUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(payload),
+      );
+
+      if (!mounted) return;
+
+      if (res.statusCode == 200) {
+        _snack('Account created. You can sign in now.');
+        Navigator.of(context).pop();
+      } else {
+        final msg = _safeError(res.body) ?? 'Create failed (${res.statusCode})';
+        _snack(msg);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Network error: $e');
+    }
+  }
+
+  String? _safeError(String body) {
+    try {
+      final m = json.decode(body);
+      if (m is Map && m['error'] is String) return m['error'] as String;
+    } catch (_) {}
+    return null;
+  }
+
+  void _snack(String m) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Create Account')),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              TextField(
-                controller: _usernameController,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  labelText: 'Username',
-                  hintText: 'Enter username',
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            TextField(
+              controller: _username,
+              decoration: const InputDecoration(
+                labelText: 'Username',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _password,
+              obscureText: !_showPass,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(_showPass ? Icons.visibility : Icons.visibility_off),
+                  onPressed: () => setState(() => _showPass = !_showPass),
                 ),
               ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  labelText: 'Password',
-                  hintText: 'Enter password',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _confirm,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Confirm Password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text('Select Account Type:', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              children: [
+                ChoiceChip(
+                  selected: _type == AccountType.parent,
+                  label: const Text('Parent'),
+                  onSelected: (_) => setState(() => _type = AccountType.parent),
                 ),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _confirmController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  labelText: 'Confirm Password',
-                  hintText: 'Re-enter password',
+                ChoiceChip(
+                  selected: _type == AccountType.child,
+                  label: const Text('Child'),
+                  onSelected: (_) => setState(() => _type = AccountType.child),
                 ),
-              ),
-              const SizedBox(height: 30),
-              const Text(
-                'Select Account Type:',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Radio<String>(
-                    value: 'Parent',
-                    groupValue: _accountType,
-                    onChanged: (value) {
-                      setState(() {
-                        _accountType = value!;
-                      });
-                    },
-                  ),
-                  const Text('Parent'),
-                  const SizedBox(width: 20),
-                  Radio<String>(
-                    value: 'Child',
-                    groupValue: _accountType,
-                    onChanged: (value) {
-                      setState(() {
-                        _accountType = value!;
-                      });
-                    },
-                  ),
-                  const Text('Child'),
-                ],
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton(
-                onPressed: () {
-                  final username = _usernameController.text.trim();
-                  final password = _passwordController.text.trim();
-                  final confirm = _confirmController.text.trim();
-
-                  if (username.isEmpty || password.isEmpty || confirm.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('All fields are required!')),
-                    );
-                    return;
-                  }
-
-                  final passwordPattern =
-                      r'^(?=.*[A-Z])(?=.*\d)(?=.*[!@#\$%^&*]).{8,}$';
-                  final regExp = RegExp(passwordPattern);
-                  if (!regExp.hasMatch(password) && passwordRequirements) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Password must be 8+ chars, include uppercase, number, and special char',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-
-                  if (password != confirm) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Passwords do not match!')),
-                    );
-                    return;
-                  }
-                  
-                  addUser(username, password).then((res){ 
-                    String body = res.body;
-                    if (res.statusCode != 200) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(body)),
-                      );
-                      return;
-                    }
-                  }); //try to register the user, return if http status failed
-                  
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Account created successfully as $_accountType!',
-                      ),
-                    ),
-                  );
-
-                  Navigator.pop(context);
-                },
+              ],
+            ),
+            const SizedBox(height: 24),
+            Center(
+              child: FilledButton(
+                onPressed: _create,
                 child: const Text('Create Account'),
               ),
-            ],
-          ),
+            )
+          ],
         ),
       ),
     );

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../models/task.dart';
 import '../models/task_step.dart';
 import '../widgets/media_picker.dart';
-import '../widgets/step_viewer_dialog.dart'; // pop-out step viewer
 
 class TaskTile extends StatefulWidget {
   const TaskTile({
@@ -12,8 +11,9 @@ class TaskTile extends StatefulWidget {
     this.onEdit,
     this.onDelete,
     this.strikeThroughWhenCompleted = true,
-    this.stepsWithImages = const <TaskStep>[], // index-aligned to task.steps
+    this.stepsWithImages = const <TaskStep>[],
     this.onOpen,
+    this.readOnly = false, // <- NEW
   });
 
   final Task task;
@@ -21,12 +21,9 @@ class TaskTile extends StatefulWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final bool strikeThroughWhenCompleted;
-
-  /// Parallel data: images for each textual step.
   final List<TaskStep> stepsWithImages;
-
-  /// Previously used to navigate; kept for compatibility (not used for pop-out)
   final VoidCallback? onOpen;
+  final bool readOnly;
 
   @override
   State<TaskTile> createState() => _TaskTileState();
@@ -44,63 +41,51 @@ class _TaskTileState extends State<TaskTile> {
     final trailingControls = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Tooltip(
-          message: 'Edit task',
-          child: IconButton(
-            icon: const Icon(Icons.edit),
-            onPressed: widget.onEdit,
-            visualDensity: VisualDensity.compact,
+        if (!widget.readOnly && widget.onEdit != null)
+          Tooltip(
+            message: 'Edit task',
+            child: IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: widget.onEdit,
+              visualDensity: VisualDensity.compact,
+            ),
           ),
-        ),
-        Tooltip(
-          message: 'Delete task',
-          child: IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: widget.onDelete,
-            visualDensity: VisualDensity.compact,
+        if (!widget.readOnly && widget.onDelete != null)
+          Tooltip(
+            message: 'Delete task',
+            child: IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: widget.onDelete,
+              visualDensity: VisualDensity.compact,
+            ),
           ),
-        ),
         Tooltip(
-          message: widget.task.completed ? 'Mark as not completed' : 'Mark as completed',
+          message: t.completed ? 'Mark as not completed' : 'Mark as completed',
           child: IconButton(
-            icon: Icon(widget.task.completed ? Icons.check_circle : Icons.check_circle_outline),
+            icon: Icon(t.completed ? Icons.check_circle : Icons.check_circle_outline),
             onPressed: widget.onToggle,
             visualDensity: VisualDensity.compact,
           ),
         ),
-        // Details / Expand: now opens the pop-out step viewer instead of navigating
         if (widget.onOpen != null)
           Tooltip(
             message: 'Open details',
             child: IconButton(
               icon: const Icon(Icons.open_in_new),
-              onPressed: () {
-                // Build a clean steps list for the viewer
-                final List<String> steps = widget.task.steps
-                    .map((s) => s.trim())
-                    .where((s) => s.isNotEmpty)
-                    .toList(growable: false);
-
-                showStepViewerDialog(
-                  context,
-                  taskTitle: widget.task.title,
-                  steps: steps,
-                  // If you later want per-step images in the viewer, we can extend it
-                  // to accept bytes. For now, per your instruction, if no image is
-                  // uploaded, show a clean default blank state.
-                  initialIndex: 0,
-                );
-              },
+              onPressed: widget.onOpen,
               visualDensity: VisualDensity.compact,
             ),
           ),
         const SizedBox(width: 6),
         Tooltip(
           message: _expanded ? 'Collapse' : 'Expand',
-          child: AnimatedRotation(
-            duration: const Duration(milliseconds: 200),
-            turns: _expanded ? 0.5 : 0.0,
-            child: const Icon(Icons.expand_more),
+          child: GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: AnimatedRotation(
+              duration: const Duration(milliseconds: 200),
+              turns: _expanded ? 0.5 : 0.0,
+              child: const Icon(Icons.expand_more),
+            ),
           ),
         ),
       ],
@@ -116,20 +101,16 @@ class _TaskTileState extends State<TaskTile> {
           trailing: trailingControls,
           tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-
           title: Text(
             t.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontWeight: FontWeight.w600,
-              // You previously asked NOT to cross out titles in Completed section,
-              // but this flag preserves your existing behavior toggle.
               decoration: applyStrike ? TextDecoration.lineThrough : null,
             ),
           ),
           subtitle: Text(_formatDisplayTime(t)),
-
           children: hasSteps
               ? <Widget>[
                   const SizedBox(height: 6),
@@ -138,50 +119,50 @@ class _TaskTileState extends State<TaskTile> {
                       .entries
                       .where((e) => e.value.trim().isNotEmpty)
                       .map((entry) {
-                        final i = entry.key;
-                        final s = entry.value.trim();
+                    final i = entry.key;
+                    final s = entry.value.trim();
 
-                        final imgs = (i < widget.stepsWithImages.length)
-                            ? widget.stepsWithImages[i].images
-                            : const <PickedImage>[];
+                    final imgs = (i < widget.stepsWithImages.length)
+                        ? widget.stepsWithImages[i].images
+                        : const <PickedImage>[];
 
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Column(
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('• '),
-                                  Expanded(child: Text(s)),
-                                ],
-                              ),
-                              if (imgs.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                GridView.builder(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: imgs.length,
-                                  gridDelegate:
-                                      const SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: 3,
-                                    mainAxisSpacing: 6,
-                                    crossAxisSpacing: 6,
-                                  ),
-                                  itemBuilder: (_, j) => ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.memory(
-                                      imgs[j].bytes,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              const Text('• '),
+                              Expanded(child: Text(s)),
                             ],
                           ),
-                        );
-                      }),
+                          if (imgs.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: imgs.length,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                mainAxisSpacing: 6,
+                                crossAxisSpacing: 6,
+                              ),
+                              itemBuilder: (_, j) => ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(
+                                  imgs[j].bytes,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
                 ]
               : const <Widget>[],
         ),
@@ -189,10 +170,9 @@ class _TaskTileState extends State<TaskTile> {
     );
   }
 
-  // Same helper you had before
   String _formatDisplayTime(Task t) {
     final start = t.startTime?.trim();
-    final end   = t.endTime?.trim();
+    final end = t.endTime?.trim();
     final startPeriod = (t.period ?? '').trim().toUpperCase();
 
     bool valid(String? hhmm) {
@@ -236,7 +216,7 @@ class _TaskTileState extends State<TaskTile> {
     final flipForward = endFlip24 >= s24;
     final endPeriod = sameForward ? startPeriod : (flipForward ? flipped : startPeriod);
 
-    final left  = '${fmt(start)} ${lower(startPeriod)}';
+    final left = '${fmt(start)} ${lower(startPeriod)}';
     final right = '${fmt(end)} ${lower(endPeriod)}';
     return '$left – $right';
   }

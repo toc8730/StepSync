@@ -5,8 +5,14 @@ import '../widgets/task_editor_dialog.dart';
 import '../pages/task_detail_page.dart';
 
 class TasksSection extends StatelessWidget {
-  const TasksSection({super.key, required this.ctrl});
+  const TasksSection({
+    super.key,
+    required this.ctrl,
+    this.readOnly = false,
+  });
+
   final TaskController ctrl;
+  final bool readOnly; // child => true
 
   @override
   Widget build(BuildContext context) {
@@ -47,9 +53,12 @@ class TasksSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title, style: Theme.of(c).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                Text(subtitle, style: Theme.of(c).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(c).colorScheme.onSurface.withOpacity(0.65),
-                )),
+                Text(
+                  subtitle,
+                  style: Theme.of(c).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(c).colorScheme.onSurface.withOpacity(0.65),
+                      ),
+                ),
               ],
             ),
           ),
@@ -65,12 +74,17 @@ class TasksSection extends StatelessWidget {
 
   List<Widget> _buildList(BuildContext context, List items, {required bool strikeThroughWhenCompleted}) {
     if (items.isEmpty) {
-      return [Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text('No tasks here.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-        )),
-      )];
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Text(
+            'No tasks here.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                ),
+          ),
+        )
+      ];
     }
     return [
       const SizedBox(height: 8),
@@ -78,21 +92,26 @@ class TasksSection extends StatelessWidget {
         final t = items[i];
         return TaskTile(
           task: t,
+          readOnly: readOnly, // <- hide edit/delete if child
           strikeThroughWhenCompleted: strikeThroughWhenCompleted,
           onToggle: () {
             final idx = ctrl.all.indexOf(t);
-            if (idx != -1) ctrl.toggleCompleted(idx);
+            if (idx != -1) ctrl.toggleCompleted(idx); // child CAN still toggle
           },
-          onEdit: () async {
-            final idx = ctrl.all.indexOf(t);
-            if (idx == -1) return;
-            final edited = await TaskEditorDialog.show(context, initial: t);
-            if (edited != null) ctrl.update(idx, edited);
-          },
-          onDelete: () {
-            final idx = ctrl.all.indexOf(t);
-            if (idx != -1) ctrl.removeAt(idx);
-          },
+          onEdit: readOnly
+              ? null
+              : () async {
+                  final idx = ctrl.all.indexOf(t);
+                  if (idx == -1) return;
+                  final edited = await TaskEditorDialog.show(context, initial: t);
+                  if (edited != null) ctrl.update(idx, edited);
+                },
+          onDelete: readOnly
+              ? null
+              : () {
+                  final idx = ctrl.all.indexOf(t);
+                  if (idx != -1) ctrl.removeAt(idx);
+                },
           onOpen: () {
             Navigator.of(context).push(
               MaterialPageRoute(

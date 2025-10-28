@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:my_app/data/globals.dart';
 import 'homepage.dart';
 import 'create_account_page.dart';
@@ -16,12 +15,11 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   bool _obscure = true;
   bool _canSignIn = false;
 
-  final String apiUrl = "http://127.0.0.1:5000/login"; // Adjust if using physical device
+  final String apiUrl = "http://127.0.0.1:5000/login";
 
   @override
   void initState() {
@@ -70,33 +68,45 @@ class _LoginPageState extends State<LoginPage> {
         }),
       );
 
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final token = data['token'];
+        final token = (data['token'] ?? '') as String;
+        final role  = (data['role']  ?? '') as String;
+        final uname = (data['username'] ?? _usernameController.text.trim()) as String;
 
-        // Save token securely
         AppGlobals.token = token;
-        print('Token saved: $token');
 
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (_) => HomePage(
-              username: _usernameController.text.trim(),
+              username: uname,
+              role: role,
               token: token,
             ),
           ),
         );
       } else {
-        final error = json.decode(response.body)['error'] ?? 'Login failed';
+        final error = _safeError(response.body) ?? 'Login failed';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $error')),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Network error: $e')),
       );
     }
+  }
+
+  String? _safeError(String body) {
+    try {
+      final m = json.decode(body);
+      if (m is Map && m['error'] is String) return m['error'] as String;
+    } catch (_) {}
+    return null;
   }
 
   @override
