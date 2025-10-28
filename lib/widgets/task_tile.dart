@@ -1,6 +1,9 @@
-import 'dart:typed_data';
+// lib/widgets/task_tile.dart
 import 'package:flutter/material.dart';
 import '../models/task.dart';
+import '../models/task_step.dart';
+import '../widgets/media_picker.dart';
+import '../widgets/step_viewer_dialog.dart'; // ← pop-out viewer
 
 class TaskTile extends StatefulWidget {
   const TaskTile({
@@ -10,9 +13,9 @@ class TaskTile extends StatefulWidget {
     this.onEdit,
     this.onDelete,
     this.strikeThroughWhenCompleted = true,
-    this.onOpen,
+    this.stepsWithImages = const <TaskStep>[],
+    this.onOpen, // optional legacy hook
     this.readOnly = false,
-    this.stepsImageBytes = const <Uint8List?>[], // index-aligned per step (one image or null)
   });
 
   final Task task;
@@ -20,11 +23,14 @@ class TaskTile extends StatefulWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final bool strikeThroughWhenCompleted;
-  final VoidCallback? onOpen;
-  final bool readOnly;
+  final List<TaskStep> stepsWithImages;
 
-  /// One image per step (nullable = no image). Must be index-aligned to task.steps.
-  final List<Uint8List?> stepsImageBytes;
+  /// If provided, will be called when tapping the open button.
+  /// If null, we show the StepViewerDialog pop-out by default.
+  final VoidCallback? onOpen;
+
+  /// Hide edit/delete when true (child view).
+  final bool readOnly;
 
   @override
   State<TaskTile> createState() => _TaskTileState();
@@ -42,7 +48,7 @@ class _TaskTileState extends State<TaskTile> {
     final trailingControls = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (!widget.readOnly && widget.onEdit != null)
+        if (!widget.readOnly)
           Tooltip(
             message: 'Edit task',
             child: IconButton(
@@ -51,7 +57,7 @@ class _TaskTileState extends State<TaskTile> {
               visualDensity: VisualDensity.compact,
             ),
           ),
-        if (!widget.readOnly && widget.onDelete != null)
+        if (!widget.readOnly)
           Tooltip(
             message: 'Delete task',
             child: IconButton(
@@ -63,30 +69,41 @@ class _TaskTileState extends State<TaskTile> {
         Tooltip(
           message: t.completed ? 'Mark as not completed' : 'Mark as completed',
           child: IconButton(
-            icon: Icon(t.completed ? Icons.check_circle : Icons.check_circle_outline),
+            icon: Icon(
+              t.completed ? Icons.check_circle : Icons.check_circle_outline,
+            ),
             onPressed: widget.onToggle,
             visualDensity: VisualDensity.compact,
           ),
         ),
-        if (widget.onOpen != null)
-          Tooltip(
-            message: 'Open details',
-            child: IconButton(
-              icon: const Icon(Icons.open_in_new),
-              onPressed: widget.onOpen,
-              visualDensity: VisualDensity.compact,
-            ),
+        Tooltip(
+          message: 'Open (pop-out)',
+          child: IconButton(
+            icon: const Icon(Icons.open_in_new),
+            onPressed: () {
+              // If caller provided a custom handler, use it.
+              if (widget.onOpen != null) {
+                widget.onOpen!();
+                return;
+              }
+              // Default behavior: show the Step Viewer dialog (your pop-out UX).
+              StepViewerDialog.show(
+                context,
+                task: widget.task,
+                stepsWithImages: widget.stepsWithImages,
+                initialIndex: 0,
+              );
+            },
+            visualDensity: VisualDensity.compact,
           ),
+        ),
         const SizedBox(width: 6),
         Tooltip(
           message: _expanded ? 'Collapse' : 'Expand',
-          child: GestureDetector(
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: AnimatedRotation(
-              duration: const Duration(milliseconds: 200),
-              turns: _expanded ? 0.5 : 0.0,
-              child: const Icon(Icons.expand_more),
-            ),
+          child: AnimatedRotation(
+            duration: const Duration(milliseconds: 200),
+            turns: _expanded ? 0.5 : 0.0,
+            child: const Icon(Icons.expand_more),
           ),
         ),
       ],
@@ -117,10 +134,17 @@ class _TaskTileState extends State<TaskTile> {
           children: hasSteps
               ? <Widget>[
                   const SizedBox(height: 6),
-                  ...t.steps.asMap().entries.where((e) => e.value.trim().isNotEmpty).map((entry) {
+                  ...t.steps
+                      .asMap()
+                      .entries
+                      .where((e) => e.value.trim().isNotEmpty)
+                      .map((entry) {
                     final i = entry.key;
                     final s = entry.value.trim();
-                    final bytes = (i < widget.stepsImageBytes.length) ? widget.stepsImageBytes[i] : null;
+
+                    final imgs = (i < widget.stepsWithImages.length)
+                        ? widget.stepsWithImages[i].images
+                        : const <PickedImage>[];
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -134,15 +158,25 @@ class _TaskTileState extends State<TaskTile> {
                               Expanded(child: Text(s)),
                             ],
                           ),
-                          if (bytes != null) ...[
+                          if (imgs.isNotEmpty) ...[
                             const SizedBox(height: 6),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.memory(
-                                bytes,
-                                height: 110,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics:
+                                  const NeverScrollableScrollPhysics(),
+                              itemCount: imgs.length,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                mainAxisSpacing: 6,
+                                crossAxisSpacing: 6,
+                              ),
+                              itemBuilder: (_, j) => ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(
+                                  imgs[j].bytes,
+                                  fit: BoxFit.cover,
+                                ),
                               ),
                             ),
                           ],
@@ -201,7 +235,8 @@ class _TaskTileState extends State<TaskTile> {
     final flipped = (startPeriod == 'AM') ? 'PM' : 'AM';
     final endFlip24 = to24(end, flipped);
     final flipForward = endFlip24 >= s24;
-    final endPeriod = sameForward ? startPeriod : (flipForward ? flipped : startPeriod);
+    final endPeriod =
+        sameForward ? startPeriod : (flipForward ? flipped : startPeriod);
 
     final left = '${fmt(start)} ${lower(startPeriod)}';
     final right = '${fmt(end)} ${lower(endPeriod)}';

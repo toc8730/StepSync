@@ -17,7 +17,7 @@ CORS(app)
 
 # -------------------- Config --------------------
 BASEDIR = os.path.abspath(os.path.dirname(__file__))
-DB_URI = "sqlite:///users.db"  # lives next to where you run the app
+DB_URI = "sqlite:///users.db"
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URI
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -35,23 +35,22 @@ class User(db.Model):
     username     = db.Column(db.String(100), unique=True, nullable=False)
     password     = db.Column(db.String(200), nullable=False)  # hashed
     account_type = db.Column(db.Text, nullable=False)         # "parent" | "child"
-    profile_data = db.Column(db.Text)                         # JSON string (dict)
-    family_id    = db.Column(db.String(20), nullable=True)    # FK-ish to Family.family_id
+    profile_data = db.Column(db.Text)                         # JSON string
+    family_id    = db.Column(db.String(20), nullable=True)
 
 class Family(db.Model):
     __tablename__ = "families"
     id               = db.Column(db.Integer, primary_key=True)
-    family_id        = db.Column(db.String(20), unique=True, nullable=False)  # public identifier
+    family_id        = db.Column(db.String(20), unique=True, nullable=False)
     name             = db.Column(db.String(100), nullable=False)
-    password         = db.Column(db.String(200), nullable=False)              # hashed
-    creator_username = db.Column(db.String(100), nullable=False)              # who created it
+    password         = db.Column(db.String(200), nullable=False)
+    creator_username = db.Column(db.String(100), nullable=False)
 
 with app.app_context():
     db.create_all()
 
 # -------------------- Helpers --------------------
 def _safe_profile_dict(text_json: str | None) -> dict:
-    """Return a dict with at least {'schedule_blocks': []}."""
     if not text_json:
         return {"schedule_blocks": []}
     try:
@@ -68,13 +67,62 @@ def _rand_family_id(n: int = 10) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(n))
 
+def _norm_block(b: dict | None) -> dict:
+    """Normalize a block dict so matching is tolerant of missing keys/whitespace/case."""
+    b = b or {}
+    def s(x): return (x or "").strip()
+    def upper2(x): 
+        x = (x or "").strip().upper()
+        return x if x in ("AM", "PM") else ""
+    steps = b.get("steps") or []
+    if isinstance(steps, list):
+        steps = [s(x) for x in steps if isinstance(x, str)]
+    else:
+        steps = []
+    return {
+        "title": s(b.get("title")),
+        "startTime": s(b.get("startTime")),
+        "endTime": s(b.get("endTime")),
+        "period": upper2(b.get("period")),
+        "steps": steps,
+        "hidden": bool(b.get("hidden", False)),
+        "completed": bool(b.get("completed", False)),
+    }
+
+def _first_match_index(blocks: list, cand: dict) -> int:
+    """Find index of matching block with several fallbacks."""
+    C = _norm_block(cand)
+    # 1) strict normalized equality
+    for i, raw in enumerate(blocks):
+        if not isinstance(raw, dict): 
+            continue
+        if _norm_block(raw) == C:
+            return i
+    # 2) relaxed: title + start/end/period (ignore steps/flags)
+    for i, raw in enumerate(blocks):
+        if not isinstance(raw, dict): 
+            continue
+        R = _norm_block(raw)
+        if (R["title"] == C["title"]
+            and R["startTime"] == C["startTime"]
+            and R["endTime"] == C["endTime"]
+            and R["period"] == C["period"]):
+            return i
+    # 3) title-only fallback (use first)
+    for i, raw in enumerate(blocks):
+        if not isinstance(raw, dict): 
+            continue
+        R = _norm_block(raw)
+        if R["title"] == C["title"] and R["title"]:
+            return i
+    return -1
+
 # -------------------- Auth --------------------
 @app.route("/register", methods=["POST"])
 def register():
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
-    # Accept multiple keys for compatibility with your client
     raw_role = (data.get("account_type") or data.get("type") or data.get("role") or "parent").strip().lower()
     account_type = "child" if raw_role == "child" else "parent"
 
@@ -86,7 +134,6 @@ def register():
         return jsonify({"error": "Username already exists"}), 400
 
     hashed_pw = generate_password_hash(password)
-    # Always start with normalized profile payload
     default_profile_data = json.dumps({"schedule_blocks": []})
     new_user = User(
         username=username,
@@ -120,7 +167,6 @@ def login():
 @app.route("/profile", methods=["GET"])
 @jwt_required()
 def profile_get():
-    """Return schedule data as proper JSON {schedule_blocks: [...]}."""
     current_user = get_jwt_identity()
     user = User.query.filter_by(username=current_user).first()
     if not user:
@@ -130,7 +176,6 @@ def profile_get():
 @app.route("/me", methods=["GET"])
 @jwt_required()
 def me():
-    """Return user + family info for your Profile tile."""
     current_user = get_jwt_identity()
     user = User.query.filter_by(username=current_user).first()
     if not user:
@@ -142,10 +187,7 @@ def me():
         if fam:
             role = "owner" if fam.creator_username == user.username else "member"
             fam_entry = {
-                "family": {
-                    "name": fam.name,
-                    "identifier": fam.family_id
-                },
+                "family": {"name": fam.name, "identifier": fam.family_id},
                 "role": role
             }
 
@@ -164,11 +206,12 @@ def block_add():
         return jsonify({"error": "User not found"}), 404
 
     payload = request.get_json(silent=True) or {}
-    if "block" not in payload:
+    if "block" not in payload or not isinstance(payload["block"], dict):
         return jsonify({"error": "Missing 'block'"}), 400
 
     prof = _safe_profile_dict(user.profile_data)
-    prof["schedule_blocks"].append(payload["block"])
+    # normalize before storing so matching is consistent later
+    prof["schedule_blocks"].append(_norm_block(payload["block"]))
     user.profile_data = json.dumps(prof)
     db.session.commit()
     return jsonify({"message": "Block add successful"}), 200
@@ -188,15 +231,53 @@ def block_edit():
         return jsonify({"error": "Missing 'old_block' or 'new_block'"}), 400
 
     prof = _safe_profile_dict(user.profile_data)
-    try:
-        idx = prof["schedule_blocks"].index(old_block)
-        prof["schedule_blocks"][idx] = new_block
-    except ValueError:
+    idx = _first_match_index(prof["schedule_blocks"], old_block)
+    if idx < 0:
         return jsonify({"error": "Old block not found"}), 404
 
+    prof["schedule_blocks"][idx] = _norm_block(new_block)
     user.profile_data = json.dumps(prof)
     db.session.commit()
     return jsonify({"message": "Block edit successful"}), 200
+
+@app.route("/profile/block/delete", methods=["POST"])
+@jwt_required()
+def block_delete():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Restrict children
+    if user.account_type.lower() == "child":
+        return jsonify({"error": "Children cannot delete tasks"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    prof = _safe_profile_dict(user.profile_data)
+    blocks = prof["schedule_blocks"]
+
+    # delete by index (if provided)
+    if isinstance(payload.get("index"), int):
+        i = payload["index"]
+        if 0 <= i < len(blocks):
+            removed = blocks.pop(i)
+            user.profile_data = json.dumps(prof)
+            db.session.commit()
+            return jsonify({"message": "Deleted", "deleted": removed}), 200
+        return jsonify({"error": "Index out of range"}), 400
+
+    # delete by block (robust matching)
+    cand = payload.get("block")
+    if isinstance(cand, dict):
+        idx = _first_match_index(blocks, cand)
+        if idx >= 0:
+            removed = blocks.pop(idx)
+            user.profile_data = json.dumps(prof)
+            db.session.commit()
+            return jsonify({"message": "Deleted", "deleted": removed}), 200
+        return jsonify({"error": "Block not found"}), 404
+
+    return jsonify({"error": "Provide 'index' or 'block'"}), 400
 
 # -------------------- Families --------------------
 @app.route("/family/create", methods=["POST"])
@@ -205,7 +286,6 @@ def create_family():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     password = data.get("password") or ""
-    # client may provide a family_id, otherwise generate one
     family_id = (data.get("family_id") or "").strip() or _rand_family_id(10)
 
     if not name:
@@ -221,7 +301,6 @@ def create_family():
     fam = Family(family_id=family_id, name=name, password=hashed_pw, creator_username=creator)
     db.session.add(fam)
 
-    # Optionally assign creator
     user = User.query.filter_by(username=creator).first()
     if user:
         user.family_id = family_id
@@ -254,5 +333,4 @@ def health():
     return jsonify({"ok": True})
 
 if __name__ == "__main__":
-    # Run on 127.0.0.1:5000 for your Flutter client
     app.run(host="127.0.0.1", port=5000, debug=True)
