@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import '../task_controller.dart';
 import '../widgets/task_tile.dart';
 import '../widgets/task_editor_dialog.dart';
-import '../pages/task_detail_page.dart';
+import '../widgets/step_viewer_dialog.dart';
+import '../models/task_step.dart';
 
 class TasksSection extends StatelessWidget {
   const TasksSection({
@@ -113,13 +114,13 @@ class TasksSection extends StatelessWidget {
                   if (idx != -1) ctrl.removeAt(idx);
                 },
           onOpen: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => TaskDetailPage(
-                  task: t,
-                  stepsWithImages: const [], // for now
-                ),
-              ),
+            // Use the new pop-out viewer dialog
+            StepViewerDialog.show(
+              context,
+              task: t,
+              // If you have parallel images per step, pass them here; leaving empty for now.
+              stepsWithImages: const <TaskStep>[],
+              initialIndex: 0,
             );
           },
         );
