@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:my_app/data/globals.dart';
 
 class JoinFamilyPage extends StatefulWidget {
   const JoinFamilyPage({super.key});
@@ -36,7 +37,7 @@ class _JoinFamilyPageState extends State<JoinFamilyPage> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-    final token = await _storage.read(key: 'jwt_token');
+    final token = AppGlobals.token;
 
     final response = await http.post(
       Uri.parse('http://127.0.0.1:5000/family/join'),
