@@ -1,18 +1,28 @@
+// lib/widgets/task_editor_dialog.dart
+import 'dart:typed_data';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import '../models/task.dart';
-import 'media_picker.dart';
-
+import '../data/images_repo.dart';
 
 class TaskEditorDialog extends StatefulWidget {
   const TaskEditorDialog({super.key, this.initial});
   final Task? initial;
 
   static Future<Task?> show(BuildContext context, {Task? initial}) {
-    return showDialog<Task>(
+    return showDialog<Task?>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => TaskEditorDialog(initial: initial),
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: TaskEditorDialog(initial: initial),
+      ),
     );
+  }
+
+  // You already call this elsewhere from your templates helper.
+  static Future<Task?> pickAndEdit(BuildContext context) {
+    return show(context);
   }
 
   @override
@@ -20,69 +30,70 @@ class TaskEditorDialog extends StatefulWidget {
 }
 
 class _TaskEditorDialogState extends State<TaskEditorDialog> {
-  final _formKey = GlobalKey<FormState>();
+  // Task fields
+  final _title = TextEditingController();
+  final _start = TextEditingController();
+  final _end = TextEditingController();
+  String _period = 'AM'; // AM / PM
 
-  late final TextEditingController _titleCtrl;
-  late final TextEditingController _startCtrl;
-  late final TextEditingController _endCtrl;
-  final TextEditingController _stepCtrl = TextEditingController();
+  // Step model (dynamic count, arrow navigable)
+  final List<TextEditingController> _stepsCtrls = [];
+  final List<Uint8List?> _stepImages = [];
+  int _index = 0; // current step index in the editor
+  static const int _maxSteps = 12;
 
-  String _period = 'AM';
-  List<String> _steps = [''];
-  List<PickedImage> _stepImages = [];
-  int _currentStep = 0;
+  String? _error; // form-level errors (e.g., invalid time)
 
-  final RegExp _timeRe = RegExp(r'^(?:[1-9]|1[0-2]):[0-5][0-9]$');
-  
   @override
   void initState() {
     super.initState();
-    final t = widget.initial;
-    _titleCtrl = TextEditingController(text: t?.title ?? '');
-    _startCtrl = TextEditingController(text: t?.startTime ?? '');
-    _endCtrl   = TextEditingController(text: t?.endTime ?? '');
-    _period    = t?.period ?? 'AM';
-    _steps     = (t?.steps.isNotEmpty == true) ? List.of(t!.steps) : [''];
-    _currentStep = 0;
-    _stepCtrl.text = _steps[_currentStep];
 
-    _stepCtrl.addListener(() => setState(() {}));
-    _startCtrl.addListener(() => setState(() {}));
-    _endCtrl.addListener(() => setState(() {}));
+    // Initialize from initial task (edit) or blank (create)
+    if (widget.initial != null) {
+      final t = widget.initial!;
+      _title.text = t.title;
+      if (t.startTime != null) _start.text = t.startTime!;
+      if (t.endTime != null) _end.text = t.endTime!;
+      final p = (t.period ?? '').trim().toUpperCase();
+      if (p == 'AM' || p == 'PM') _period = p;
+
+      // steps + images (one per step)
+      final steps = t.steps.isEmpty ? <String>[''] : t.steps;
+      final imgs = ImagesRepo.I.get(t, steps.length);
+      for (int i = 0; i < steps.length; i++) {
+        _stepsCtrls.add(TextEditingController(text: steps[i]));
+        _stepImages.add(i < imgs.length ? imgs[i] : null);
+        _stepsCtrls.last.addListener(_refreshButtonsState);
+      }
+    } else {
+      // start with a single blank step
+      _stepsCtrls.add(TextEditingController()..addListener(_refreshButtonsState));
+      _stepImages.add(null);
+    }
   }
 
   @override
   void dispose() {
-    _titleCtrl.dispose();
-    _startCtrl.dispose();
-    _endCtrl.dispose();
-    _stepCtrl.dispose();
+    _title.dispose();
+    _start.dispose();
+    _end.dispose();
+    for (final c in _stepsCtrls) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  String? _timeValidator(String? value) {
-    final v = value?.trim() ?? '';
-    if (v.isEmpty) return null; // optional
-    if (!_timeRe.hasMatch(v)) return 'Use H:MM (1–12:00–59)';
-    return null;
+  // ---------- Time helpers ----------
+  bool _validTime(String s) {
+    // allows "1:00" or "01:00" through "12:59"
+    final re = RegExp(r'^(?:0?[1-9]|1[0-2]):[0-5][0-9]$');
+    return re.hasMatch(s.trim());
   }
 
-  bool _isValidTime(String? v) => (v != null && v.trim().isNotEmpty && _timeRe.hasMatch(v.trim()));
-
-  // Preview: flip AM/PM ONLY if interval crosses 12:00 (same logic as tile)
-  String _displayTimePreview() {
-    final start = _startCtrl.text.trim();
-    final end   = _endCtrl.text.trim();
-    final hasStart = start.isNotEmpty;
-    final hasEnd   = end.isNotEmpty;
-
-    if (!hasStart && !hasEnd) return '';
-
-    final startOk = !hasStart || _isValidTime(start);
-    final endOk   = !hasEnd   || _isValidTime(end);
-    if (!startOk || !endOk) return 'Invalid time format. Use H:MM (1–12:00–59)';
-
-    final period = _period.trim().toUpperCase();
+  String _displayPreview() {
+    final s = _start.text.trim();
+    final e = _end.text.trim();
+    final per = _period.toUpperCase();
 
     String fmt(String hhmm) {
       final parts = hhmm.split(':');
@@ -90,7 +101,6 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
       final mm = parts[1].padLeft(2, '0');
       return (mm == '00') ? '$h' : '$h:$mm';
     }
-    String lower(String p) => p.toLowerCase();
 
     int to24(String hhmm, String period) {
       final parts = hhmm.split(':');
@@ -100,208 +110,368 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
       return (h12 + add) * 60 + mm;
     }
 
-    if (hasStart && !hasEnd) {
-      return '${fmt(start)} ${lower(period)}';
-    }
-    if (!hasStart && hasEnd) {
-      return '${fmt(end)} ${lower(period)}';
-    }
+    bool vs(String t) => _validTime(t);
 
-    // both present
-    final s24 = to24(start, period);
+    // If user entered something invalid, explicitly say so
+    if (s.isNotEmpty && !vs(s)) return 'Invalid time';
+    if (e.isNotEmpty && !vs(e)) return 'Invalid time';
 
-    final endSame24 = to24(end, period);
+    if (!vs(s) && !vs(e)) return '';
+    if (vs(s) && !vs(e)) return '${fmt(s)} ${per.toLowerCase()}';
+    if (!vs(s) && vs(e)) return '${fmt(e)} ${per.toLowerCase()}';
+
+    // Cross-noon logic: if end < start in same period, flip end period
+    final s24 = to24(s, per);
+    final endSame24 = to24(e, per);
     final sameForward = endSame24 >= s24;
-
-    final flipped = (period == 'AM') ? 'PM' : 'AM';
-    final endFlip24 = to24(end, flipped);
+    final flipped = (per == 'AM') ? 'PM' : 'AM';
+    final endFlip24 = to24(e, flipped);
     final flipForward = endFlip24 >= s24;
+    final endPeriod = sameForward ? per : (flipForward ? flipped : per);
 
-    final endPeriod = sameForward
-        ? period
-        : (flipForward ? flipped : period);
-
-    final left  = '${fmt(start)} ${lower(period)}';
-    final right = '${fmt(end)} ${lower(endPeriod)}';
-    return '$left – $right';
+    return '${fmt(s)} ${per.toLowerCase()} – ${fmt(e)} ${endPeriod.toLowerCase()}';
   }
 
-  // Steps logic unchanged
-  bool get _currentStepEmpty => _stepCtrl.text.trim().isEmpty;
+  // ---------- Step navigation & actions ----------
+  bool get _isFirst => _index == 0;
+  bool get _isLast => _index == _stepsCtrls.length - 1;
 
-  void _goPrev() {
-    if (_currentStep == 0) return;
-    _steps[_currentStep] = _stepCtrl.text;
+  void _refreshButtonsState() {
+    // Just triggers a rebuild so Add button enablement updates as user types
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _goPrev() async {
+    if (_isFirst) return;
+    setState(() => _index--);
+  }
+
+  Future<void> _goNext() async {
+    if (_isLast) return;
+    setState(() => _index++);
+  }
+
+  bool get _canAddStepHere {
+    // Don’t allow adding a new step if current step is empty
+    return _stepsCtrls[_index].text.trim().isNotEmpty && _stepsCtrls.length < _maxSteps;
+  }
+
+  void _addStep() {
+    if (!_canAddStepHere) {
+      // No hover on many platforms, show a quick hint
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Step ${_index + 1} can’t be empty before adding a new one.'),
+          duration: const Duration(milliseconds: 900),
+        ),
+      );
+      return;
+    }
     setState(() {
-      _currentStep--;
-      _stepCtrl.text = _steps[_currentStep];
+      _stepsCtrls.insert(_index + 1, TextEditingController()..addListener(_refreshButtonsState));
+      _stepImages.insert(_index + 1, null);
+      _index++; // jump to the newly created step
     });
   }
 
-  void _goNext() {
-    if (_currentStepEmpty) return;
-    _steps[_currentStep] = _stepCtrl.text;
-    if (_currentStep + 1 < _steps.length) {
-      setState(() {
-        _currentStep++;
-        _stepCtrl.text = _steps[_currentStep];
-      });
-    } else {
-      setState(() {
-        _steps.add('');
-        _currentStep++;
-        _stepCtrl.text = '';
-      });
-    }
+  void _attachOrChangeImage() async {
+    const typeGroup = XTypeGroup(
+      label: 'images',
+      extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic'],
+    );
+    final file = await openFile(acceptedTypeGroups: const [typeGroup]);
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    setState(() {
+      _stepImages[_index] = bytes;
+    });
   }
 
-  void _pruneEmptyStepsInPlace() {
-    _steps = _steps.where((s) => s.trim().isNotEmpty).toList();
-    if (_steps.isEmpty) {
-      _steps = [''];
-      _currentStep = 0;
-      _stepCtrl.text = '';
+  void _removeImage() {
+    setState(() {
+      _stepImages[_index] = null;
+    });
+  }
+
+  // ---------- Save ----------
+  void _save() {
+    setState(() => _error = null);
+
+    final title = _title.text.trim();
+    if (title.isEmpty) {
+      setState(() => _error = 'Title is required');
       return;
     }
-    if (_currentStep >= _steps.length) _currentStep = _steps.length - 1;
-    _stepCtrl.text = _steps[_currentStep];
-  }
 
-  void _save() {
-    _steps[_currentStep] = _stepCtrl.text;
+    final s = _start.text.trim();
+    final e = _end.text.trim();
+    final hasS = s.isNotEmpty;
+    final hasE = e.isNotEmpty;
 
-    if (!_formKey.currentState!.validate()) return;
+    if (hasS && !_validTime(s)) {
+      setState(() => _error = 'Start time is invalid. Use H:MM (e.g., 1:00).');
+      return;
+    }
+    if (hasE && !_validTime(e)) {
+      setState(() => _error = 'End time is invalid. Use H:MM (e.g., 1:00).');
+      return;
+    }
 
-    final title = _titleCtrl.text.trim();
-    if (title.isEmpty) return;
+    // Collect only non-empty steps; images stay index-aligned
+    final steps = <String>[];
+    final images = <Uint8List?>[];
+    for (int i = 0; i < _stepsCtrls.length; i++) {
+      final txt = _stepsCtrls[i].text.trim();
+      if (txt.isNotEmpty) {
+        steps.add(txt);
+        images.add(_stepImages[i]);
+      }
+    }
 
-    _pruneEmptyStepsInPlace();
-
+    // Must have at least one step? (You didn’t require it; leaving optional.)
+    // Build Task
     final task = Task(
       title: title,
-      steps: _steps.where((s) => s.trim().isNotEmpty).toList(),
-      startTime: _startCtrl.text.trim().isEmpty ? null : _startCtrl.text.trim(),
-      endTime:   _endCtrl.text.trim().isEmpty   ? null : _endCtrl.text.trim(),
-      period: _period,
+      startTime: hasS ? s : null,
+      endTime: hasE ? e : null,
+      period: (hasS || hasE) ? _period : null,
+      steps: steps,
       completed: widget.initial?.completed ?? false,
       hidden: widget.initial?.hidden ?? false,
     );
-    Navigator.of(context).pop(task);
+
+    // Store per-step images (in-memory)
+    ImagesRepo.I.set(task, images.isEmpty ? List<Uint8List?>.filled(steps.length, null) : images);
+
+    Navigator.of(context).pop<Task>(task);
   }
 
   @override
   Widget build(BuildContext context) {
-    final stepCount = _steps.length;
-    final isFirst = _currentStep == 0;
-    final isLastExisting = _currentStep == stepCount - 1;
-    final timePreview = _displayTimePreview();
+    final theme = Theme.of(context);
+    final total = _stepsCtrls.length;
+    final preview = _displayPreview();
+    final curText = _stepsCtrls[_index].text;
+    final hasImg = _stepImages[_index] != null;
 
-    return AlertDialog(
-      title: Text(widget.initial == null ? 'Add Task' : 'Edit Task'),
-      content: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          autovalidateMode: AutovalidateMode.onUserInteraction,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _titleCtrl,
-                decoration: const InputDecoration(labelText: 'Title'),
-              ),
-              const SizedBox(height: 8),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 760, maxHeight: 680),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    widget.initial == null ? 'Create Task' : 'Edit Task',
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
 
-              Row(
-                
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _startCtrl,
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(right: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title
+                    TextField(
+                      controller: _title,
                       decoration: const InputDecoration(
-                        labelText: 'Start (e.g., 11:00)',
-                        helperText: 'H:MM (1–12:00–59)',
+                        labelText: 'Title',
+                        border: OutlineInputBorder(),
                       ),
-                      keyboardType: TextInputType.datetime,
-                      validator: _timeValidator,
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _endCtrl,
+                    const SizedBox(height: 12),
+
+                    // Time row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _start,
+                            decoration: const InputDecoration(
+                              labelText: 'Start (H:MM)',
+                              hintText: 'e.g., 8:00',
+                              border: OutlineInputBorder(),
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _end,
+                            decoration: const InputDecoration(
+                              labelText: 'End (H:MM)',
+                              hintText: 'e.g., 8:10',
+                              border: OutlineInputBorder(),
+                            ),
+                            onChanged: (_) => setState(() {}),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        DropdownButton<String>(
+                          value: _period,
+                          items: const [
+                            DropdownMenuItem(value: 'AM', child: Text('AM')),
+                            DropdownMenuItem(value: 'PM', child: Text('PM')),
+                          ],
+                          onChanged: (v) => setState(() => _period = v ?? 'AM'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Text('Will display: '),
+                        Text(
+                          preview.isEmpty ? '(no time)' : preview,
+                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+                    // Step navigator header
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: theme.colorScheme.outlineVariant),
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: _index == 0 ? 'First step' : 'Previous step',
+                            onPressed: _isFirst ? null : _goPrev,
+                            icon: const Icon(Icons.arrow_back_ios_new),
+                          ),
+                          Expanded(
+                            child: Center(
+                              child: Text(
+                                'Step ${_index + 1} of $total',
+                                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: _isLast ? 'Last step' : 'Next step',
+                            onPressed: _isLast ? null : _goNext,
+                            icon: const Icon(Icons.arrow_forward_ios),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Image preview (one per step)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        height: 180,
+                        width: double.infinity,
+                        color: theme.colorScheme.surfaceVariant.withOpacity(0.25),
+                        child: hasImg
+                            ? Image.memory(
+                                _stepImages[_index]!,
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: double.infinity,
+                              )
+                            : Center(
+                                child: Icon(
+                                  Icons.image_not_supported_outlined,
+                                  size: 56,
+                                  color: theme.colorScheme.onSurface.withOpacity(0.35),
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Image actions
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: _attachOrChangeImage,
+                          icon: Icon(hasImg ? Icons.switch_camera : Icons.add_a_photo),
+                          label: Text(hasImg ? 'Change image' : 'Attach image'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: hasImg ? _removeImage : null,
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Remove'),
+                        ),
+                        const Spacer(),
+                        Tooltip(
+                          message: _canAddStepHere
+                              ? 'Add a new step after this one'
+                              : 'Step ${_index + 1} can’t be empty',
+                          child: FilledButton.icon(
+                            onPressed: _canAddStepHere ? _addStep : null,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add step'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Step text field
+                    TextField(
+                      controller: _stepsCtrls[_index],
+                      maxLines: null,
                       decoration: const InputDecoration(
-                        labelText: 'End (e.g., 12:15)',
-                        helperText: 'H:MM (1–12:00–59)',
+                        labelText: 'Step text',
+                        hintText: 'Describe what to do',
+                        border: OutlineInputBorder(),
                       ),
-                      keyboardType: TextInputType.datetime,
-                      validator: _timeValidator,
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  DropdownButton<String>(
-                    value: _period,
-                    items: const [
-                      DropdownMenuItem(value: 'AM', child: Text('AM')),
-                      DropdownMenuItem(value: 'PM', child: Text('PM')),
+
+                    if (_error != null) ...[
+                      const SizedBox(height: 8),
+                      Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
                     ],
-                    onChanged: (v) => setState(() => _period = v ?? 'AM'),
-                  ),
-                ],
+                  ],
+                ),
               ),
+            ),
 
-              const SizedBox(height: 8),
-              if (timePreview.isNotEmpty)
-                Text(timePreview, style: Theme.of(context).textTheme.bodyMedium),
-
-              const SizedBox(height: 12),
-
-              Row(
-                
-                children: [
-                  IconButton(
-                    tooltip: 'Previous step',
-                    onPressed: isFirst ? null : _goPrev,
-                    icon: const Icon(Icons.chevron_left),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    child: const Text('Cancel'),
                   ),
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        'Step ${_currentStep + 1} of $stepCount',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                    ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _save,
+                    child: const Text('Save'),
                   ),
-                  Tooltip(
-                    message: _currentStepEmpty
-                        ? 'Step ${_currentStep + 1} can’t be empty'
-                        : (isLastExisting ? 'Move to new step' : 'Next step'),
-                    child: IconButton(
-                      onPressed: _currentStepEmpty ? null : _goNext,
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _stepCtrl,
-                decoration: const InputDecoration(labelText: 'Step text'),
-                onChanged: (v) => _steps[_currentStep] = v,
-                maxLines: null,
-              ),
-              const SizedBox(height: 16),
-              MediaPicker(
-                label: 'Attach Step Images',
-                onChanged: (imgs) => _stepImages = imgs,
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        FilledButton(onPressed: _save, child: const Text('Save')),
-      ],
     );
   }
 }

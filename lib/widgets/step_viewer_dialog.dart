@@ -1,32 +1,28 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:file_selector/file_selector.dart';
+
 import '../models/task.dart';
-import '../models/task_step.dart';
-import '../widgets/media_picker.dart';
+import '../data/images_repo.dart';
 
 /// Pop-out overlay to view a Task's steps one-by-one with left/right arrows.
-/// - Shows "Step X of N"
-/// - Disables left arrow on first step and right arrow on last step
-/// - If there are images for the current step, shows them; otherwise a blank placeholder
-/// - Text-to-speech button reads the current step text
+/// - "Step X of N", disabled arrows at ends
+/// - Per-step image (one image max): attach/change or remove
+/// - Text-to-speech for the step text
 class StepViewerDialog extends StatefulWidget {
   const StepViewerDialog({
     super.key,
     required this.task,
-    this.stepsWithImages = const <TaskStep>[],
     this.initialIndex = 0,
   });
 
   final Task task;
-  /// Must be index-aligned to task.steps (same length or shorter).
-  final List<TaskStep> stepsWithImages;
   final int initialIndex;
 
-  /// Call this to show the dialog.
   static Future<void> show(
     BuildContext context, {
     required Task task,
-    List<TaskStep> stepsWithImages = const <TaskStep>[],
     int initialIndex = 0,
   }) {
     return showDialog(
@@ -34,11 +30,7 @@ class StepViewerDialog extends StatefulWidget {
       barrierDismissible: true,
       builder: (_) => Dialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-        child: StepViewerDialog(
-          task: task,
-          stepsWithImages: stepsWithImages,
-          initialIndex: initialIndex,
-        ),
+        child: StepViewerDialog(task: task, initialIndex: initialIndex),
       ),
     );
   }
@@ -51,6 +43,9 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
   late final List<String> _steps;
   late int _index;
 
+  // Per-step image bytes, kept in a small in-memory repo.
+  late List<Uint8List?> _stepImages;
+
   // TTS
   final FlutterTts _tts = FlutterTts();
   bool _isSpeaking = false;
@@ -58,34 +53,24 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
   @override
   void initState() {
     super.initState();
-    _steps = (widget.task.steps).map((e) => e.trim()).toList();
+    _steps = widget.task.steps.map((e) => e.trim()).toList();
     if (_steps.isEmpty) _steps.add('');
-    _index = _clampIndex(widget.initialIndex);
-    final firstNonEmpty = _steps.indexWhere((s) => s.isNotEmpty);
-    if (firstNonEmpty != -1) _index = firstNonEmpty;
+    _index = (widget.initialIndex).clamp(0, _steps.length - 1);
+
+    // initialize images from repo
+    _stepImages = ImagesRepo.I.get(widget.task, _steps.length);
 
     _initTts();
   }
 
   Future<void> _initTts() async {
-    // Reasonable defaults; platform will pick a voice.
     await _tts.setLanguage("en-US");
     await _tts.setSpeechRate(0.45);
     await _tts.setPitch(1.0);
-
-    _tts.setStartHandler(() {
-      setState(() => _isSpeaking = true);
-    });
-    _tts.setCompletionHandler(() {
-      setState(() => _isSpeaking = false);
-    });
-    _tts.setCancelHandler(() {
-      setState(() => _isSpeaking = false);
-    });
-    _tts.setErrorHandler((msg) {
-      setState(() => _isSpeaking = false);
-      // Optional: you could show a snackbar here if desired
-    });
+    _tts.setStartHandler(() => setState(() => _isSpeaking = true));
+    _tts.setCompletionHandler(() => setState(() => _isSpeaking = false));
+    _tts.setCancelHandler(() => setState(() => _isSpeaking = false));
+    _tts.setErrorHandler((_) => setState(() => _isSpeaking = false));
   }
 
   @override
@@ -94,12 +79,11 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
     super.dispose();
   }
 
-  int _clampIndex(int i) => i.clamp(0, _steps.length - 1);
+  bool get _isFirst => _index == 0;
+  bool get _isLast => _index == _steps.length - 1;
+  String get _stepText => _steps[_index];
 
-  bool get _isFirst => _index <= 0;
-  bool get _isLast => _index >= _steps.length - 1;
-
-  void _goPrev() async {
+  Future<void> _goPrev() async {
     if (_isFirst) return;
     await _tts.stop();
     setState(() {
@@ -108,7 +92,7 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
     });
   }
 
-  void _goNext() async {
+  Future<void> _goNext() async {
     if (_isLast) return;
     await _tts.stop();
     setState(() {
@@ -118,32 +102,46 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
   }
 
   Future<void> _toggleSpeak() async {
-    final text = _steps[_index];
-    if (text.isEmpty) return;
-
+    if (_stepText.isEmpty) return;
     if (_isSpeaking) {
       await _tts.stop();
       setState(() => _isSpeaking = false);
       return;
     }
-    // start speaking
-    await _tts.stop(); // ensure clean start
-    final res = await _tts.speak(text);
-    if (res == 1) {
-      setState(() => _isSpeaking = true);
-    }
+    await _tts.stop();
+    final res = await _tts.speak(_stepText);
+    if (res == 1) setState(() => _isSpeaking = true);
+  }
+
+  Future<void> _attachOrChangeImage() async {
+    // Only one image per step: pick a single file
+    const typeGroup = XTypeGroup(
+      label: 'images',
+      extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic'],
+    );
+    final file = await openFile(acceptedTypeGroups: const [typeGroup]);
+    if (file == null) return;
+
+    final bytes = await file.readAsBytes();
+    setState(() {
+      _stepImages[_index] = bytes;
+    });
+    ImagesRepo.I.setAt(widget.task, _index, bytes, _steps.length);
+  }
+
+  Future<void> _removeImage() async {
+    setState(() {
+      _stepImages[_index] = null;
+    });
+    ImagesRepo.I.setAt(widget.task, _index, null, _steps.length);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final stepText = _steps[_index];
     final total = _steps.length;
-    final images = (_index < widget.stepsWithImages.length)
-        ? (widget.stepsWithImages[_index].images)
-        : const <PickedImage>[];
-
-    final canSpeak = stepText.isNotEmpty;
+    final bytes = _stepImages[_index];
+    final canSpeak = _stepText.isNotEmpty;
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720, maxHeight: 640),
@@ -152,7 +150,7 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header row: Title + Close
+            // Header: title + close
             Row(
               children: [
                 Expanded(
@@ -174,39 +172,64 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
             Expanded(
               child: Row(
                 children: [
-                  // Left arrow
                   _SideArrow(
                     direction: AxisDirection.left,
                     onTap: _isFirst ? null : _goPrev,
                   ),
-
-                  // Content area
                   Expanded(
                     child: Column(
                       children: [
-                        // Image panel (or blank)
+                        // Image area (one image per step)
                         Expanded(
                           child: Container(
                             width: double.infinity,
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(16),
                               color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
-                              border: Border.all(
-                                color: theme.colorScheme.outlineVariant,
-                              ),
+                              border: Border.all(color: theme.colorScheme.outlineVariant),
                             ),
                             clipBehavior: Clip.antiAlias,
-                            child: _StepImageArea(images: images),
+                            child: bytes == null
+                                ? Center(
+                                    child: Icon(
+                                      Icons.image_not_supported_outlined,
+                                      size: 64,
+                                      color: theme.colorScheme.onSurface.withOpacity(0.35),
+                                    ),
+                                  )
+                                : Image.memory(
+                                    bytes,
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                  ),
                           ),
+                        ),
+                        const SizedBox(height: 10),
+                        // Image actions
+                        Row(
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: _attachOrChangeImage,
+                              icon: Icon(bytes == null ? Icons.add_a_photo : Icons.switch_camera),
+                              label: Text(bytes == null ? 'Attach image' : 'Change image'),
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              onPressed: bytes == null ? null : _removeImage,
+                              icon: const Icon(Icons.delete_outline),
+                              label: const Text('Remove image'),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
 
-                        // Step text with TTS button
+                        // Step text + TTS
                         Row(
                           children: [
                             Expanded(
                               child: Text(
-                                stepText.isEmpty ? '(No text for this step)' : stepText,
+                                _stepText.isEmpty ? '(No text for this step)' : _stepText,
                                 textAlign: TextAlign.left,
                                 style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                               ),
@@ -225,8 +248,6 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
                       ],
                     ),
                   ),
-
-                  // Right arrow
                   _SideArrow(
                     direction: AxisDirection.right,
                     onTap: _isLast ? null : _goNext,
@@ -235,7 +256,6 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
               ),
             ),
 
-            // Optional footer with the overall task title/time
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerLeft,
@@ -255,7 +275,6 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
 
 class _SideArrow extends StatelessWidget {
   const _SideArrow({required this.direction, this.onTap});
-
   final AxisDirection direction;
   final VoidCallback? onTap;
 
@@ -274,45 +293,6 @@ class _SideArrow extends StatelessWidget {
         tooltip: disabled
             ? (isLeft ? 'First step' : 'Last step')
             : (isLeft ? 'Previous step' : 'Next step'),
-      ),
-    );
-  }
-}
-
-class _StepImageArea extends StatelessWidget {
-  const _StepImageArea({required this.images});
-  final List<PickedImage> images;
-
-  @override
-  Widget build(BuildContext context) {
-    if (images.isEmpty) {
-      // Default blank area if no image uploaded
-      return Center(
-        child: Icon(
-          Icons.image_not_supported_outlined,
-          size: 64,
-          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.35),
-        ),
-      );
-    }
-
-    if (images.length == 1) {
-      return Image.memory(
-        images.first.bytes,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-      );
-    }
-
-    // If multiple images for the step, a simple PageView
-    return PageView.builder(
-      itemCount: images.length,
-      itemBuilder: (_, i) => Image.memory(
-        images[i].bytes,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
       ),
     );
   }

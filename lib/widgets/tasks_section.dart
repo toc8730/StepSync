@@ -3,7 +3,7 @@ import '../task_controller.dart';
 import '../widgets/task_tile.dart';
 import '../widgets/task_editor_dialog.dart';
 import '../widgets/step_viewer_dialog.dart';
-import '../models/task_step.dart';
+import '../data/images_repo.dart';
 
 class TasksSection extends StatelessWidget {
   const TasksSection({
@@ -91,13 +91,16 @@ class TasksSection extends StatelessWidget {
       const SizedBox(height: 8),
       ...List.generate(items.length, (i) {
         final t = items[i];
+        final stepImages = ImagesRepo.I.get(t, t.steps.length); // per-step images
+
         return TaskTile(
           task: t,
-          readOnly: readOnly, // <- hide edit/delete if child
+          readOnly: readOnly,
+          stepsImageBytes: stepImages,
           strikeThroughWhenCompleted: strikeThroughWhenCompleted,
           onToggle: () {
             final idx = ctrl.all.indexOf(t);
-            if (idx != -1) ctrl.toggleCompleted(idx); // child CAN still toggle
+            if (idx != -1) ctrl.toggleCompleted(idx);
           },
           onEdit: readOnly
               ? null
@@ -113,15 +116,11 @@ class TasksSection extends StatelessWidget {
                   final idx = ctrl.all.indexOf(t);
                   if (idx != -1) ctrl.removeAt(idx);
                 },
-          onOpen: () {
-            // Use the new pop-out viewer dialog
-            StepViewerDialog.show(
-              context,
-              task: t,
-              // If you have parallel images per step, pass them here; leaving empty for now.
-              stepsWithImages: const <TaskStep>[],
-              initialIndex: 0,
-            );
+          onOpen: () async {
+            await StepViewerDialog.show(context, task: t);
+            // After dialog closes, images may have changed. Trigger a rebuild:
+            // (If your controller exposes notifyListeners internally, the next setState above will refresh the list anyway.)
+            (context as Element).markNeedsBuild();
           },
         );
       }),

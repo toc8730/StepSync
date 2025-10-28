@@ -1,7 +1,6 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../models/task.dart';
-import '../models/task_step.dart';
-import '../widgets/media_picker.dart';
 
 class TaskTile extends StatefulWidget {
   const TaskTile({
@@ -11,9 +10,9 @@ class TaskTile extends StatefulWidget {
     this.onEdit,
     this.onDelete,
     this.strikeThroughWhenCompleted = true,
-    this.stepsWithImages = const <TaskStep>[],
     this.onOpen,
-    this.readOnly = false, // <- NEW
+    this.readOnly = false,
+    this.stepsImageBytes = const <Uint8List?>[], // index-aligned per step (one image or null)
   });
 
   final Task task;
@@ -21,9 +20,11 @@ class TaskTile extends StatefulWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final bool strikeThroughWhenCompleted;
-  final List<TaskStep> stepsWithImages;
   final VoidCallback? onOpen;
   final bool readOnly;
+
+  /// One image per step (nullable = no image). Must be index-aligned to task.steps.
+  final List<Uint8List?> stepsImageBytes;
 
   @override
   State<TaskTile> createState() => _TaskTileState();
@@ -101,6 +102,7 @@ class _TaskTileState extends State<TaskTile> {
           trailing: trailingControls,
           tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+
           title: Text(
             t.title,
             maxLines: 1,
@@ -111,20 +113,14 @@ class _TaskTileState extends State<TaskTile> {
             ),
           ),
           subtitle: Text(_formatDisplayTime(t)),
+
           children: hasSteps
               ? <Widget>[
                   const SizedBox(height: 6),
-                  ...t.steps
-                      .asMap()
-                      .entries
-                      .where((e) => e.value.trim().isNotEmpty)
-                      .map((entry) {
+                  ...t.steps.asMap().entries.where((e) => e.value.trim().isNotEmpty).map((entry) {
                     final i = entry.key;
                     final s = entry.value.trim();
-
-                    final imgs = (i < widget.stepsWithImages.length)
-                        ? widget.stepsWithImages[i].images
-                        : const <PickedImage>[];
+                    final bytes = (i < widget.stepsImageBytes.length) ? widget.stepsImageBytes[i] : null;
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -138,24 +134,15 @@ class _TaskTileState extends State<TaskTile> {
                               Expanded(child: Text(s)),
                             ],
                           ),
-                          if (imgs.isNotEmpty) ...[
+                          if (bytes != null) ...[
                             const SizedBox(height: 6),
-                            GridView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: imgs.length,
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 3,
-                                mainAxisSpacing: 6,
-                                crossAxisSpacing: 6,
-                              ),
-                              itemBuilder: (_, j) => ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.memory(
-                                  imgs[j].bytes,
-                                  fit: BoxFit.cover,
-                                ),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.memory(
+                                bytes,
+                                height: 110,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
                               ),
                             ),
                           ],
