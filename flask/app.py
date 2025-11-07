@@ -173,6 +173,23 @@ def profile_get():
         return jsonify({"error": "User not found"}), 404
     return jsonify(_safe_profile_dict(user.profile_data)), 200
 
+# get the profile of the head of the family (used for saving blocks from the parent to the child account)
+@app.route("/profile/family", methods=["GET"])
+@jwt_required()
+def family_get():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = Family.query.filter_by(family_id=user.family_id).first()
+    if not family:
+        return jsonify(_safe_profile_dict(user.profile_data)), 200 # if no family, load user who queried as a failsafe
+    family_head = User.query.filter_by(username=family.creator_username).first()
+    if not family_head:
+        return jsonify({"error": "Family head not found"}), 404
+    return jsonify(_safe_profile_dict(family_head.profile_data)), 200
+    
+
 @app.route("/me", methods=["GET"])
 @jwt_required()
 def me():

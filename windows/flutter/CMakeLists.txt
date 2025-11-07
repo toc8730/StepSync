@@ -83,6 +83,21 @@ target_include_directories(flutter_wrapper_app PUBLIC
 )
 add_dependencies(flutter_wrapper_app flutter_assemble)
 
+# === Windows / C++/WinRT fix ===
+# Many C++/WinRT symbols (WINRT_IMPL_*) are implemented in the Windows Runtime
+# library (runtimeobject.lib). If a plugin or wrapper consumes WinRT headers
+# but doesn't explicitly link that library, you'll see LNK2019 unresolved
+# externals such as WINRT_IMPL_RoGetActivationFactory.
+#
+# Link runtimeobject into the wrapper targets for MSVC so plugin targets
+# consuming flutter_wrapper_plugin/fluter_wrapper_app inherit the link.
+if(MSVC)
+  # Link the Windows Runtime base library so implementations of WINRT_IMPL_*
+  # are available at link time.
+  target_link_libraries(flutter_wrapper_plugin PUBLIC runtimeobject)
+  target_link_libraries(flutter_wrapper_app PUBLIC runtimeobject)
+endif()
+
 # === Flutter tool backend ===
 # _phony_ is a non-existent file to force this command to run every time,
 # since currently there's no way to get a full input/output list from the

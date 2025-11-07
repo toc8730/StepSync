@@ -39,7 +39,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
 
   Future<void> _loadFromServer() async {
     try {
-      final res = await http.get(Uri.parse('$_base/profile'), headers: _jsonHeaders);
+      final res = await http.get(Uri.parse('$_base/profile/family'), headers: _jsonHeaders);
       if (res.statusCode != 200) {
         _toast('Failed to load profile: ${res.statusCode}');
         return;
