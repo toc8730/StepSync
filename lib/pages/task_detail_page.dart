@@ -1,8 +1,8 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../models/task.dart';
 import '../models/task_step.dart';
-import '../widgets/media_picker.dart';
 
 class TaskDetailPage extends StatefulWidget {
   const TaskDetailPage({
@@ -22,11 +22,30 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
   final FlutterTts _tts = FlutterTts();
   bool _isSpeaking = false;
   int? _speakingIndex;
+  int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _initTts();
+  }
+
+  List<_StepDisplay> get _stepDisplays {
+    final List<_StepDisplay> items = [];
+    for (var i = 0; i < widget.task.steps.length; i++) {
+      final text = widget.task.steps[i].trim();
+      if (text.isEmpty) continue;
+      final TaskStep? meta =
+          i < widget.stepsWithImages.length ? widget.stepsWithImages[i] : null;
+      final images = <Uint8List>[];
+      if (meta != null) {
+        for (final img in meta.images) {
+          images.add(img.bytes);
+        }
+      }
+      items.add(_StepDisplay(text: text, images: images));
+    }
+    return items;
   }
 
   Future<void> _initTts() async {
@@ -82,6 +101,18 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
     });
   }
 
+  void _goToStep(int delta) {
+    final total = _stepDisplays.length;
+    if (total == 0) return;
+    if (_isSpeaking) {
+      _stopSpeaking();
+    }
+    setState(() {
+      final next = (_currentIndex + delta).clamp(0, total - 1);
+      _currentIndex = next.toInt();
+    });
+  }
+
   @override
   void dispose() {
     _tts.stop();
@@ -90,12 +121,17 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.task;
-    final steps = t.steps;
+    final steps = _stepDisplays;
+    final total = steps.length;
+    final hasSteps = total > 0;
+    final currentIndex = hasSteps
+        ? (_currentIndex.clamp(0, total - 1) as num).toInt()
+        : 0;
+    final currentStep = hasSteps ? steps[currentIndex] : null;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(t.title),
+        title: Text(widget.task.title),
         actions: [
           if (_isSpeaking)
             IconButton(
@@ -105,123 +141,132 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
             ),
         ],
       ),
-      body: Row(
-        children: [
-          // LEFT COLUMN – steps
-          Expanded(
-            flex: 3,
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: steps.length,
-              itemBuilder: (context, i) {
-                final text = steps[i].trim();
-                if (text.isEmpty) return const SizedBox.shrink();
-
-                final isActive = (_speakingIndex == i);
-                return InkWell(
-                  onTap: () => _speakStep(i, text),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      color: isActive
-                          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: isActive
-                            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.35)
-                            : Theme.of(context).dividerColor.withValues(alpha: 0.4),
-                      ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          isActive ? Icons.volume_up : Icons.volume_mute,
-                          size: 18,
-                          color: isActive
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).iconTheme.color?.withValues(alpha: 0.6),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            text,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              color: isActive
-                                  ? Theme.of(context).colorScheme.primary
-                                  : null,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
-          // RIGHT COLUMN – images
-          Expanded(
-            flex: 2,
-            child: SingleChildScrollView(
+      body: hasSteps
+          ? Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (widget.stepsWithImages.isEmpty)
-                    const Text(
-                      'No images for this task.',
-                      style: TextStyle(color: Colors.grey),
-                    )
-                  else
-                    ...widget.stepsWithImages.asMap().entries.map((entry) {
-                      final i = entry.key;
-                      final step = entry.value;
-                      if (step.images.isEmpty) return const SizedBox.shrink();
-
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Step ${i + 1}',
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                  Text(
+                    'Step ${currentIndex + 1} of $total',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: Card(
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    currentStep!.text,
+                                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
                                 ),
-                          ),
-                          const SizedBox(height: 6),
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: step.images.length,
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
-                              mainAxisSpacing: 6,
-                              crossAxisSpacing: 6,
+                                const SizedBox(width: 12),
+                                IconButton.filledTonal(
+                                  tooltip: _isSpeaking && _speakingIndex == currentIndex
+                                      ? 'Stop reading'
+                                      : 'Read this step aloud',
+                                  icon: Icon(
+                                    _isSpeaking && _speakingIndex == currentIndex
+                                        ? Icons.volume_up
+                                        : Icons.volume_mute,
+                                  ),
+                                  onPressed: () => _speakStep(currentIndex, currentStep.text),
+                                ),
+                              ],
                             ),
-                            itemBuilder: (_, j) => ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.memory(
-                                step.images[j].bytes,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                        ],
-                      );
-                    }),
+                            const SizedBox(height: 20),
+                            Expanded(child: _buildImageArea(currentStep.images)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: currentIndex > 0 ? () => _goToStep(-1) : null,
+                          icon: const Icon(Icons.arrow_back),
+                          label: const Text('Previous'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: currentIndex < total - 1 ? () => _goToStep(1) : null,
+                          icon: const Icon(Icons.arrow_forward),
+                          label: const Text('Next'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
+            )
+          : Center(
+              child: Text(
+                'No steps provided for this task.',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                    ),
+              ),
             ),
-          ),
-        ],
-      ),
     );
   }
+
+  Widget _buildImageArea(List<Uint8List> images) {
+    if (images.isEmpty) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(Icons.image_not_supported_outlined, size: 48, color: Colors.grey),
+          SizedBox(height: 12),
+          Text('No image attached to this step'),
+        ],
+      );
+    }
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        AspectRatio(
+          aspectRatio: 4 / 3,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Image.memory(
+              images.first,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+        if (images.length > 1) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Showing 1 of ${images.length} images',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StepDisplay {
+  const _StepDisplay({required this.text, required this.images});
+  final String text;
+  final List<Uint8List> images;
 }

@@ -257,6 +257,41 @@ def block_edit():
     db.session.commit()
     return jsonify({"message": "Block edit successful"}), 200
 
+@app.route("/profile/family/block/edit", methods=["POST"])
+@jwt_required()
+def family_block_edit():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    if not user.family_id:
+        return jsonify({"error": "User not linked to a family"}), 400
+
+    family = Family.query.filter_by(family_id=user.family_id).first()
+    if not family:
+        return jsonify({"error": "Family not found"}), 404
+
+    parent = User.query.filter_by(username=family.creator_username).first()
+    if not parent:
+        return jsonify({"error": "Family head not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    old_block = payload.get("old_block")
+    new_block = payload.get("new_block")
+    if old_block is None or new_block is None:
+        return jsonify({"error": "Missing 'old_block' or 'new_block'"}), 400
+
+    prof = _safe_profile_dict(parent.profile_data)
+    idx = _first_match_index(prof["schedule_blocks"], old_block)
+    if idx < 0:
+        return jsonify({"error": "Old block not found"}), 404
+
+    prof["schedule_blocks"][idx] = _norm_block(new_block)
+    parent.profile_data = json.dumps(prof)
+    db.session.commit()
+    return jsonify({"message": "Family block edit successful"}), 200
+
 @app.route("/profile/block/delete", methods=["POST"])
 @jwt_required()
 def block_delete():

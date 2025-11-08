@@ -37,8 +37,7 @@ class _HomePageState extends State<HomePage> {
 
   Map<String, String> get _jsonHeaders => {
         'Content-Type': 'application/json',
-        if (AppGlobals.token != null)
-          'Authorization': 'Bearer ${AppGlobals.token}',
+        'Authorization': 'Bearer ${AppGlobals.token}',
       };
 
   Future<void> _loadFromServer() async {
@@ -112,7 +111,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _serverRemove(Task t) async {
     try {
       final res = await http.post(
-        Uri.parse('$_base/profile/block/remove'), // ensure this exists in app.py
+        Uri.parse('$_base/profile/block/delete'),
         headers: _jsonHeaders,
         body: json.encode({'block': _taskToBlock(t)}),
       );
@@ -331,11 +330,12 @@ class _ParentTasksSectionWithSync extends StatelessWidget {
         return TaskTile(
           task: t,
           strikeThroughWhenCompleted: strikeThroughWhenCompleted,
-          onToggle: () {
+          onToggle: () async {
             final idx = ctrl.all.indexOf(t);
-            if (idx != -1) ctrl.toggleCompleted(idx);
-            // If you want toggle to persist, uncomment:
-            // if (idx != -1) onEdited(t, ctrl.all[idx]);
+            if (idx == -1) return;
+            final before = _cloneTask(ctrl.all[idx]);
+            ctrl.toggleCompleted(idx);
+            await onEdited(before, ctrl.all[idx]);
           },
           onEdit: () async {
             final idx = ctrl.all.indexOf(t);
@@ -370,3 +370,13 @@ class _ParentTasksSectionWithSync extends StatelessWidget {
     ];
   }
 }
+
+Task _cloneTask(Task t) => Task(
+      title: t.title,
+      steps: List<String>.from(t.steps),
+      startTime: t.startTime,
+      endTime: t.endTime,
+      period: t.period,
+      hidden: t.hidden,
+      completed: t.completed,
+    );

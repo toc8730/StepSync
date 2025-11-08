@@ -33,8 +33,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
 
   Map<String, String> get _jsonHeaders => {
         'Content-Type': 'application/json',
-        if (AppGlobals.token != null)
-          'Authorization': 'Bearer ${AppGlobals.token}',
+        'Authorization': 'Bearer ${AppGlobals.token}',
       };
 
   Future<void> _loadFromServer() async {
@@ -70,7 +69,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
   Future<void> _persistToggle(Task before, Task after) async {
     try {
       final res = await http.post(
-        Uri.parse('$_base/profile/block/edit'),
+        Uri.parse('$_base/profile/family/block/edit'),
         headers: _jsonHeaders,
         body: json.encode({'old_block': _taskToBlock(before), 'new_block': _taskToBlock(after)}),
       );
@@ -237,6 +236,7 @@ class _ChildTasksSectionViewOnly extends StatelessWidget {
         return TaskTile(
           task: t,
           strikeThroughWhenCompleted: strikeThroughWhenCompleted,
+          readOnly: true,
           // Child can ONLY toggle completion and open details.
           onToggle: () async {
             final idx = ctrl.all.indexOf(t);

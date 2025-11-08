@@ -348,7 +348,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+                        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.35),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: theme.colorScheme.outlineVariant),
                       ),
@@ -383,7 +383,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
                       child: Container(
                         height: 180,
                         width: double.infinity,
-                        color: theme.colorScheme.surfaceVariant.withOpacity(0.25),
+                        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.25),
                         child: hasImg
                             ? Image.memory(
                                 _stepImages[_index]!,

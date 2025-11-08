@@ -154,7 +154,7 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceVariant.withOpacity(0.55),
+                color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.55),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: theme.colorScheme.outlineVariant),
               ),
@@ -192,7 +192,7 @@ class _StepViewerDialogState extends State<StepViewerDialog> {
                     child: Container(
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(16),
-                        color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+                        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.35),
                         border: Border.all(color: theme.colorScheme.outlineVariant),
                       ),
                       clipBehavior: Clip.antiAlias,
