@@ -56,6 +56,7 @@ class User(db.Model):
     username     = db.Column(db.String(100), unique=True, nullable=False)
     email        = db.Column(db.String(200), unique=True, nullable=True)
     password     = db.Column(db.String(200), nullable=False)  # hashed
+    auth_provider = db.Column(db.String(20), nullable=False, default="password")  # "password" | "google"
     account_type = db.Column(db.Text, nullable=False)         # "parent" | "child"
     profile_data = db.Column(db.Text)                         # JSON string
     family_id    = db.Column(db.String(20), nullable=True)
@@ -75,6 +76,11 @@ with app.app_context():
     if "email" not in user_columns:
         with db.engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN email TEXT"))
+    if "auth_provider" not in user_columns:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'password'"))
+        with db.engine.begin() as conn:
+            conn.execute(text("UPDATE users SET auth_provider = 'password' WHERE auth_provider IS NULL OR TRIM(auth_provider) = ''"))
 
 # -------------------- Helpers --------------------
 def _default_preferences() -> dict:
@@ -108,6 +114,12 @@ def _family_for_user(user: 'User') -> 'Family | None':
     if not user.family_id:
         return None
     return Family.query.filter_by(family_id=user.family_id).first()
+
+def _current_user_from_token() -> 'User | None':
+    ident = get_jwt_identity()
+    if not ident:
+        return None
+    return User.query.filter_by(username=ident).first()
 
 def _schedule_owner(user: 'User') -> tuple['User', bool]:
     is_master = True
@@ -192,6 +204,66 @@ def _verify_google_id_token(id_token: str) -> dict | None:
     if data.get("email_verified") not in ("true", True, 1, "1"):
         return None
     return data
+
+def _verify_google_access_token(access_token: str) -> dict | None:
+    info = _fetch_google_token_info(access_token)
+    if not info:
+        return None
+    aud = info.get("aud", "")
+    if GOOGLE_CLIENT_IDS and aud not in GOOGLE_CLIENT_IDS:
+        return None
+    if info.get("email_verified") not in ("true", True, 1, "1"):
+        profile = _fetch_google_userinfo(access_token)
+    else:
+        profile = info
+    if not profile:
+        return None
+    email = (profile.get("email") or "").strip().lower()
+    if not email:
+        fallback = _fetch_google_userinfo(access_token)
+        if fallback:
+            email = (fallback.get("email") or "").strip().lower()
+            profile.update(fallback)
+    if not email:
+        return None
+    profile["email"] = email
+    return profile
+
+def _fetch_google_token_info(access_token: str) -> dict | None:
+    if not access_token:
+        return None
+    try:
+        resp = requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"access_token": access_token},
+            timeout=8,
+        )
+    except requests.RequestException:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        return None
+
+def _fetch_google_userinfo(access_token: str) -> dict | None:
+    if not access_token:
+        return None
+    try:
+        resp = requests.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=8,
+        )
+    except requests.RequestException:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        return None
 
 def _clean_display_name(*candidates: str) -> str:
     for raw in candidates:
@@ -306,6 +378,22 @@ _TIME_RE = re.compile(
     re.IGNORECASE,
 )
 
+def _split_time_and_period(value: str | None) -> tuple[str | None, str | None]:
+    text = (value or "").strip()
+    if not text:
+        return None, None
+    match = _TIME_RE.search(text)
+    if not match:
+        return None, None
+    hour = int(match.group('hour'))
+    minute = int(match.group('minute') or 0)
+    period_raw = match.group('period') or ""
+    period = 'AM' if period_raw.lower().startswith('a') else 'PM'
+    hour12 = hour % 12
+    if hour12 == 0:
+        hour12 = 12
+    return f"{hour12}:{minute:02d}", period
+
 _AI_SYSTEM_INSTRUCTION = (
     "You are a helpful family scheduling assistant. "
     "Given the user's request, produce ONLY valid JSON matching this schema:\n"
@@ -361,11 +449,23 @@ def _sanitize_model_tasks(raw) -> list[dict]:
         else:
             steps = []
 
-        start = str(item.get("startTime", "")).strip() or None
-        end = str(item.get("endTime", "")).strip() or None
+        start_raw = str(item.get("startTime", "")).strip()
+        end_raw = str(item.get("endTime", "")).strip()
+        start = start_raw or None
+        end = end_raw or None
         period = str(item.get("period", "")).strip().upper()
         if period not in ("AM", "PM"):
             period = None
+        norm_start, start_period = _split_time_and_period(start_raw)
+        norm_end, end_period = _split_time_and_period(end_raw)
+        if norm_start:
+            start = norm_start
+        if norm_end:
+            end = norm_end
+        if not period and start_period:
+            period = start_period
+        if not period and end_period:
+            period = end_period
 
         tasks.append({
             "title": title[:60],
@@ -560,6 +660,7 @@ def register():
     new_user = User(
         username=username,
         password=hashed_pw,
+        auth_provider="password",
         account_type=account_type,
         profile_data=default_profile_data
     )
@@ -589,15 +690,19 @@ def login():
 def login_google():
     data = request.get_json(silent=True) or {}
     id_token = (data.get("id_token") or "").strip()
+    access_token = (data.get("access_token") or "").strip()
     preferred_raw = (data.get("preferred_role") or "").strip().lower()
     if preferred_raw in ("parent", "child"):
         preferred_role: str | None = preferred_raw
     else:
         preferred_role = None
-    if not id_token:
-        return jsonify({"error": "id_token required"}), 400
 
-    info = _verify_google_id_token(id_token)
+    if not id_token and not access_token:
+        return jsonify({"error": "id_token or access_token required"}), 400
+
+    info = _verify_google_id_token(id_token) if id_token else None
+    if not info and access_token:
+        info = _verify_google_access_token(access_token)
     if not info:
         return jsonify({"error": "Invalid Google token"}), 401
 
@@ -632,6 +737,7 @@ def login_google():
             username=username,
             email=email,
             password=generate_password_hash(secrets.token_urlsafe(16)),
+            auth_provider="google",
             account_type=preferred_role or "parent",
             profile_data=default_profile_data,
         )
@@ -644,6 +750,7 @@ def login_google():
             user.username = _unique_username(desired, exclude_user=user)
         if user.account_type not in ("parent", "child") and preferred_role:
             user.account_type = preferred_role
+    user.auth_provider = "google"
 
     db.session.commit()
 
@@ -691,8 +798,7 @@ def family_get():
 @app.route("/me", methods=["GET"])
 @jwt_required()
 def me():
-    current_user = get_jwt_identity()
-    user = User.query.filter_by(username=current_user).first()
+    user = _current_user_from_token()
     if not user:
         return jsonify({"error": "User not found"}), 404
 
@@ -707,8 +813,118 @@ def me():
             }
 
     return jsonify({
-        "user": {"username": user.username, "role": user.account_type},
+        "user": {
+            "username": user.username,
+            "role": user.account_type,
+            "email": user.email,
+            "auth_provider": (user.auth_provider or "password"),
+        },
         "families": [fam_entry] if fam_entry else []
+    }), 200
+
+# -------------------- Account Management --------------------
+def _require_password(user: 'User', supplied: str) -> bool:
+    return bool(supplied and check_password_hash(user.password, supplied))
+
+@app.route("/account/credentials", methods=["POST"])
+@jwt_required()
+def account_update_credentials():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    current_password = (payload.get("current_password") or payload.get("password") or "").strip()
+    if not current_password:
+        return jsonify({"error": "Current password is required."}), 400
+    if not _require_password(user, current_password):
+        return jsonify({"error": "Incorrect password."}), 403
+
+    new_username = (payload.get("new_username") or "").strip()
+    new_password = str(payload.get("new_password") or "")
+    confirm_val = payload.get("confirm_password")
+    if confirm_val is None:
+        confirm_val = payload.get("new_password_confirm")
+    confirm = str(confirm_val) if confirm_val is not None else None
+
+    changes: list[str] = []
+    if new_username and new_username != user.username:
+        if len(new_username) > 100:
+            return jsonify({"error": "Username must be 1–100 characters."}), 400
+        existing = User.query.filter(User.username == new_username, User.id != user.id).first()
+        if existing:
+            return jsonify({"error": "Username is already taken."}), 400
+        previous_username = user.username
+        user.username = new_username
+        families = Family.query.filter_by(creator_username=previous_username).all()
+        for fam in families:
+            fam.creator_username = new_username
+        changes.append("username")
+
+    if new_password:
+        if confirm is not None and new_password != confirm:
+            return jsonify({"error": "Passwords do not match."}), 400
+        if not (8 <= len(new_password) <= 20):
+            return jsonify({"error": "Password must be 8–20 characters."}), 400
+        user.password = generate_password_hash(new_password)
+        changes.append("password")
+
+    if not changes:
+        return jsonify({"error": "Provide a new username and/or password to update."}), 400
+
+    db.session.commit()
+    new_token = create_access_token(identity=user.username)
+    return jsonify({
+        "message": "Account updated successfully.",
+        "username": user.username,
+        "token": new_token,
+        "changed": changes,
+    }), 200
+
+@app.route("/account/google/switch", methods=["POST"])
+@jwt_required()
+def account_switch_google():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if (user.auth_provider or "password") != "google":
+        return jsonify({"error": "Google sign-in is not linked to this account."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    current_password = (payload.get("current_password") or payload.get("password") or "").strip()
+    if not current_password:
+        return jsonify({"error": "Current password is required."}), 400
+    if not _require_password(user, current_password):
+        return jsonify({"error": "Incorrect password."}), 403
+
+    id_token = (payload.get("id_token") or "").strip()
+    if not id_token:
+        return jsonify({"error": "Google id_token is required."}), 400
+
+    info = _verify_google_id_token(id_token)
+    if not info:
+        return jsonify({"error": "Invalid Google token."}), 400
+
+    email = (info.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "Google account is missing an email address."}), 400
+    if user.email and user.email.lower() == email:
+        return jsonify({"error": "That Google account is already linked."}), 400
+
+    conflict = User.query.filter(User.email == email, User.id != user.id).first()
+    if conflict:
+        return jsonify({"error": "Another account already uses that Google email."}), 409
+
+    user.email = email
+    user.auth_provider = "google"
+
+    db.session.commit()
+    new_token = create_access_token(identity=user.username)
+    return jsonify({
+        "message": "Google account updated.",
+        "username": user.username,
+        "email": user.email,
+        "token": new_token,
     }), 200
 
 # -------------------- Schedule Blocks --------------------

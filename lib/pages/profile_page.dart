@@ -1,10 +1,14 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:my_app/data/globals.dart';
 import 'package:my_app/services/preferences_service.dart';
 import 'package:my_app/services/family_service.dart';
+import 'package:my_app/services/account_service.dart';
 import 'package:my_app/theme_controller.dart';
+import 'package:my_app/config/google_oauth_config.dart';
 
 import 'create_family_page.dart';
 import 'join_family_page.dart';
@@ -25,6 +29,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _username = '';
   String _role = ''; // parent | child
+  String? _email;
+  String _authProvider = 'password';
   String? _familyName;
   String? _familyIdentifier;
   ThemePreference _themePreference = ThemePreference.system;
@@ -33,12 +39,32 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _membersLoading = false;
   String? _membersError;
   FamilyMembers? _familyMembers;
+  final TextEditingController _newUsernameController = TextEditingController();
+  final TextEditingController _newPasswordController = TextEditingController();
+  final TextEditingController _confirmPasswordController = TextEditingController();
+  final TextEditingController _currentPasswordController = TextEditingController();
+  final TextEditingController _googlePasswordController = TextEditingController();
+  bool _showNewPassword = false;
+  bool _showCurrentPassword = false;
+  bool _showGooglePassword = false;
+  bool _updatingCredentials = false;
+  bool _switchingGoogle = false;
+  String? _accountError;
+  String? _accountSuccess;
+  String? _googleError;
+  String? _googleSuccess;
+  late final GoogleSignIn _googleSignIn;
 
   static const _meUrl = 'http://127.0.0.1:5000/me';
 
   @override
   void initState() {
     super.initState();
+    _googleSignIn = GoogleSignIn(
+      scopes: const ['email'],
+      clientId: GoogleOAuthConfig.platformClientId,
+      serverClientId: GoogleOAuthConfig.serverClientId,
+    );
     // optimistic defaults from navigation
     _username = widget.initialUsername ?? '';
     _role = (widget.initialRole ?? '').toLowerCase();
@@ -48,6 +74,16 @@ class _ProfilePageState extends State<ProfilePage> {
     if (_role == 'parent') {
       _loadFamilyMembers();
     }
+  }
+
+  @override
+  void dispose() {
+    _newUsernameController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    _currentPasswordController.dispose();
+    _googlePasswordController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPreferences() async {
@@ -138,6 +174,184 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _submitCredentialChanges() async {
+    final newUsername = _newUsernameController.text.trim();
+    final newPassword = _newPasswordController.text;
+    final confirm = _confirmPasswordController.text;
+    final current = _currentPasswordController.text.trim();
+
+    if (newUsername.isEmpty && newPassword.isEmpty) {
+      setState(() {
+        _accountError = 'Enter a new username and/or password.';
+        _accountSuccess = null;
+      });
+      return;
+    }
+    if (current.isEmpty) {
+      setState(() {
+        _accountError = 'Enter your current password to confirm changes.';
+        _accountSuccess = null;
+      });
+      return;
+    }
+    if (newPassword.isNotEmpty && (newPassword.length < 8 || newPassword.length > 20)) {
+      setState(() {
+        _accountError = 'New password must be 8–20 characters.';
+        _accountSuccess = null;
+      });
+      return;
+    }
+    if (newPassword.isNotEmpty && newPassword != confirm) {
+      setState(() {
+        _accountError = 'New passwords do not match.';
+        _accountSuccess = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _accountError = null;
+      _accountSuccess = null;
+      _updatingCredentials = true;
+    });
+
+    try {
+      final response = await AccountService.updateCredentials(
+        currentPassword: current,
+        newUsername: newUsername.isEmpty ? null : newUsername,
+        newPassword: newPassword.isEmpty ? null : newPassword,
+        confirmPassword: newPassword.isEmpty ? null : confirm,
+      );
+      if (!mounted) return;
+      if (response.token != null) {
+        AppGlobals.token = response.token!;
+      }
+      setState(() {
+        if (response.username != null) {
+          _username = response.username!;
+        }
+        _accountSuccess = 'Account details updated.';
+        _accountError = null;
+      });
+      _currentPasswordController.clear();
+      if (newUsername.isNotEmpty) {
+        _newUsernameController.clear();
+      }
+      if (newPassword.isNotEmpty) {
+        _newPasswordController.clear();
+        _confirmPasswordController.clear();
+      }
+      _showSnack('Account updated.');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _accountError = _friendlyError(e);
+        _accountSuccess = null;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _updatingCredentials = false);
+      }
+    }
+  }
+
+  Future<void> _switchGoogleAccount() async {
+    if (_authProvider != 'google') {
+      setState(() {
+        _googleError = 'This account is not linked to Google.';
+        _googleSuccess = null;
+      });
+      return;
+    }
+    final configIssue = GoogleOAuthConfig.configurationHint();
+    if (configIssue != null) {
+      setState(() {
+        _googleError = 'Google sign-in unavailable: $configIssue';
+        _googleSuccess = null;
+      });
+      return;
+    }
+
+    final password = _googlePasswordController.text.trim();
+    if (password.isEmpty) {
+      setState(() {
+        _googleError = 'Enter your password to continue.';
+        _googleSuccess = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _googleError = null;
+      _googleSuccess = null;
+      _switchingGoogle = true;
+    });
+
+    try {
+      final account = await _triggerGoogleSelection();
+      if (account == null) {
+        setState(() => _googleError = 'Google sign-in was cancelled.');
+        return;
+      }
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null) {
+        setState(() => _googleError = 'Google did not return an ID token.');
+        return;
+      }
+
+      final response = await AccountService.switchGoogleAccount(
+        currentPassword: password,
+        idToken: idToken,
+      );
+      if (!mounted) return;
+      if (response.token != null) {
+        AppGlobals.token = response.token!;
+      }
+      setState(() {
+        if (response.email != null) {
+          _email = response.email;
+        }
+        _googleSuccess = 'Google account updated.';
+        _googleError = null;
+      });
+      _googlePasswordController.clear();
+      _showSnack('Google account updated.');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _googleError = _friendlyError(e);
+        _googleSuccess = null;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _switchingGoogle = false);
+      }
+    }
+  }
+
+  Future<GoogleSignInAccount?> _triggerGoogleSelection() async {
+    if (!kIsWeb) {
+      await _googleSignIn.signOut();
+      return _googleSignIn.signIn();
+    }
+    final silent = await _googleSignIn.signInSilently();
+    if (silent != null) return silent;
+    final legacy = await _googleSignIn.signIn();
+    if (legacy == null) return null;
+    return _googleSignIn.signInSilently();
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _friendlyError(Object error) {
+    final text = error.toString();
+    return text.startsWith('Exception: ') ? text.substring('Exception: '.length) : text;
+  }
+
   Future<void> _fetchProfile() async {
     try {
       final res = await http.get(
@@ -180,6 +394,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
     final username = (user['username'] ?? _username).toString();
     final role = (user['role'] ?? _role).toString().toLowerCase();
+    final emailRaw = (user['email'] ?? '').toString();
+    final providerRaw = (user['auth_provider'] ?? '').toString().toLowerCase();
 
     String? famName;
     String? famId;
@@ -198,6 +414,8 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() {
       _username = username;
       _role = role;
+      _email = emailRaw.isEmpty ? null : emailRaw;
+      _authProvider = providerRaw.isEmpty ? 'password' : providerRaw;
       _familyName = famName;
       _familyIdentifier = famId;
       _loading = false;
@@ -269,6 +487,12 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
             const Divider(height: 0),
+            _accountSettingsCard(),
+            const Divider(height: 0),
+            if (_authProvider == 'google') ...[
+              _googleAccountCard(),
+              const Divider(height: 0),
+            ],
 
             if (isParent) ...[
               ListTile(
@@ -299,8 +523,10 @@ class _ProfilePageState extends State<ProfilePage> {
     final u = _username.isEmpty ? '—' : _username;
     final rolePretty = _role.isEmpty ? '—' : (_role[0].toUpperCase() + _role.substring(1));
     final famName = _familyName ?? 'None';
+    final emailLine = '\nEmail: ${_email ?? '—'}';
     final famIdLine = isParent ? '\nFamily Identifier: ${_familyIdentifier ?? 'None'}' : '';
     return 'Username: $u'
+           '$emailLine'
            '\nAccount Type: $rolePretty'
            '\nFamily Name: $famName$famIdLine';
   }
@@ -341,6 +567,161 @@ class _ProfilePageState extends State<ProfilePage> {
       default:
         return 'System default';
     }
+  }
+
+  Widget _accountSettingsCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Account Settings', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _newUsernameController,
+            decoration: const InputDecoration(
+              labelText: 'New username',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _newPasswordController,
+            obscureText: !_showNewPassword,
+            decoration: InputDecoration(
+              labelText: 'New password',
+              helperText: 'Leave blank to keep your current password.',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _showNewPassword = !_showNewPassword),
+                icon: Icon(_showNewPassword ? Icons.visibility : Icons.visibility_off),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _confirmPasswordController,
+            obscureText: !_showNewPassword,
+            decoration: const InputDecoration(
+              labelText: 'Confirm new password',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _currentPasswordController,
+            obscureText: !_showCurrentPassword,
+            decoration: InputDecoration(
+              labelText: 'Current password *',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _showCurrentPassword = !_showCurrentPassword),
+                icon: Icon(_showCurrentPassword ? Icons.visibility : Icons.visibility_off),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Provide your current password to confirm any username or password changes.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _updatingCredentials ? null : _submitCredentialChanges,
+            icon: _updatingCredentials
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(_updatingCredentials ? 'Saving...' : 'Save changes'),
+          ),
+          if (_accountError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _accountError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              ),
+            ),
+          if (_accountSuccess != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _accountSuccess!,
+                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _googleAccountCard() {
+    final configIssue = GoogleOAuthConfig.configurationHint();
+    final disabled = configIssue != null || _switchingGoogle;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Google Account', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text('Currently linked: ${_email ?? 'Unknown'}'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _googlePasswordController,
+            obscureText: !_showGooglePassword,
+            decoration: InputDecoration(
+              labelText: 'Password *',
+              helperText: 'Confirm with your password before switching Google accounts.',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _showGooglePassword = !_showGooglePassword),
+                icon: Icon(_showGooglePassword ? Icons.visibility : Icons.visibility_off),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: disabled ? null : _switchGoogleAccount,
+            icon: _switchingGoogle
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.swap_horiz),
+            label: Text(_switchingGoogle ? 'Switching...' : 'Switch Google account'),
+          ),
+          if (configIssue != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Google sign-in unavailable: $configIssue',
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              ),
+            ),
+          if (_googleError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _googleError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              ),
+            ),
+          if (_googleSuccess != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _googleSuccess!,
+                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _familyManagementCard() {

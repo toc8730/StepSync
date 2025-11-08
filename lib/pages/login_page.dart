@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:my_app/config/google_oauth_config.dart';
@@ -36,7 +37,7 @@ class _LoginPageState extends State<LoginPage> {
     _usernameController.addListener(_refreshCanSignIn);
     _passwordController.addListener(_refreshCanSignIn);
     _googleSignIn = GoogleSignIn(
-      scopes: const ['email'],
+      scopes: const ['email', 'profile', 'openid'],
       clientId: GoogleOAuthConfig.platformClientId,
       serverClientId: GoogleOAuthConfig.serverClientId,
     );
@@ -109,15 +110,22 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
       final auth = await account.authentication;
-      final idToken = auth.idToken;
-      if (idToken == null) {
+      final idToken = await _obtainIdToken(account);
+      final accessToken = auth.accessToken;
+      if (idToken == null && (accessToken == null || accessToken.isEmpty)) {
         final message = kIsWeb
             ? 'Google did not return an ID token. Make sure pop-ups were allowed and try again.'
-            : 'Unable to retrieve Google token.';
+            : 'Unable to retrieve Google ID token. Double-check that your OAuth client IDs match this platform.';
         _showSnack(message);
         return;
       }
-      await _submitGoogleToken(idToken, fallbackUsername: account.email);
+      await _submitGoogleToken(
+        idToken,
+        fallbackUsername: account.email,
+        accessToken: accessToken,
+      );
+    } on PlatformException catch (e) {
+      _showSnack(_friendlyGoogleError(e));
     } catch (e) {
       _showSnack('Google sign-in error: $e');
     } finally {
@@ -125,9 +133,15 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _submitGoogleToken(String idToken, {required String fallbackUsername, String? preferredRole}) async {
+  Future<void> _submitGoogleToken(
+    String? idToken, {
+    required String fallbackUsername,
+    String? preferredRole,
+    String? accessToken,
+  }) async {
     final payload = <String, String>{
-      'id_token': idToken,
+      if (idToken != null) 'id_token': idToken,
+      if (accessToken != null && accessToken.isNotEmpty) 'access_token': accessToken,
       if (preferredRole != null) 'preferred_role': preferredRole,
     };
     final response = await http.post(
@@ -153,7 +167,12 @@ class _LoginPageState extends State<LoginPage> {
         _showSnack('Google sign-in cancelled.');
         return;
       }
-      await _submitGoogleToken(idToken, fallbackUsername: fallbackUsername, preferredRole: role);
+      await _submitGoogleToken(
+        idToken,
+        fallbackUsername: fallbackUsername,
+        preferredRole: role,
+        accessToken: accessToken,
+      );
       return;
     }
 
@@ -171,6 +190,45 @@ class _LoginPageState extends State<LoginPage> {
       return _googleSignIn.signInSilently();
     }
     return _googleSignIn.signIn();
+  }
+
+  Future<String?> _obtainIdToken(GoogleSignInAccount account) async {
+    Future<String?> _tokenFor(GoogleSignInAccount acc) async {
+      final auth = await acc.authentication;
+      final tok = auth.idToken;
+      if (tok != null && tok.isNotEmpty) return tok;
+      return null;
+    }
+
+    final direct = await _tokenFor(account);
+    if (direct != null) return direct;
+
+    // Occasional bug on macOS/iOS returns null until we re-fetch the account.
+    final refreshed = await _googleSignIn.signInSilently();
+    if (refreshed != null) {
+      final retry = await _tokenFor(refreshed);
+      if (retry != null) return retry;
+    }
+
+    // Fallback: sign-out and try once more to nudge GoogleSignIn into issuing a token.
+    await _googleSignIn.signOut();
+    final reauth = await _googleSignIn.signInSilently();
+    if (reauth != null) {
+      return _tokenFor(reauth);
+    }
+    return null;
+  }
+
+  String _friendlyGoogleError(PlatformException e) {
+    final code = (e.code).toLowerCase();
+    if (code == 'popup_closed_by_user') {
+      return 'Google sign-in window was closed before it could finish. Check your OAuth client ID configuration.';
+    }
+    if (code == 'idpiframe_initialization_failed') {
+      return 'Google sign-in could not start. Verify that third-party cookies are enabled and your OAuth client IDs are correct.';
+    }
+    final details = e.message ?? e.details?.toString();
+    return 'Google sign-in error (${e.code}): ${details ?? 'unknown error'}';
   }
 
   Future<String?> _promptGoogleRole() async {
