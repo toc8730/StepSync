@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
 import '../task_controller.dart';
 import '../models/task.dart';
@@ -22,7 +23,7 @@ class ChildHomePage extends StatefulWidget {
 
 class _ChildHomePageState extends State<ChildHomePage> {
   late final TaskController _ctrl;
-  static const _base = 'http://127.0.0.1:5000';
+  static const _base = BackendConfig.baseUrl;
 
   @override
   void initState() {

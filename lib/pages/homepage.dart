@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
 import '../task_controller.dart';
 import '../models/task.dart';
@@ -27,7 +28,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final TaskController _ctrl;
-  static const _base = 'http://127.0.0.1:5000';
+  static const _base = BackendConfig.baseUrl;
   String? _selectedChild;
   List<FamilyMember> _children = const <FamilyMember>[];
   bool _childrenLoading = false;
@@ -163,7 +164,14 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
-      if (res.statusCode != 200) _toast('Server delete failed (${res.statusCode})');
+      if (res.statusCode == 404) {
+        _toast('Task already removed on server. Refreshing…');
+        await _loadFromServer();
+        return;
+      }
+      if (res.statusCode != 200) {
+        _toast('Server delete failed (${res.statusCode})');
+      }
     } catch (e) {
       _toast('Delete error: $e');
     }
@@ -230,9 +238,20 @@ class _HomePageState extends State<HomePage> {
   }
 
   String get _assigneeLabel {
-    if (_selectedChild != null && _selectedChild!.isNotEmpty) return _selectedChild!;
+    if (_selectedChild != null && _selectedChild!.isNotEmpty) {
+      return _childLabel(_selectedChild!);
+    }
     if (_children.isEmpty) return 'Family schedule';
     return 'Family schedule (all children)';
+  }
+
+  String _childLabel(String username) {
+    for (final child in _children) {
+      if (child.username == username) {
+        return child.displayName;
+      }
+    }
+    return username;
   }
 
   Future<void> _handleMenuSelect(String value) async {
@@ -405,7 +424,7 @@ class _HomePageState extends State<HomePage> {
                 ..._children.map(
                   (child) => DropdownMenuItem<String?>(
                     value: child.username,
-                    child: Text(child.username),
+                    child: Text(child.displayName),
                   ),
                 ),
               ],

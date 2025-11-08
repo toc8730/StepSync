@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
 import 'package:my_app/services/preferences_service.dart';
 import 'package:my_app/services/family_service.dart';
@@ -28,6 +29,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String? _error;
 
   String _username = '';
+  String _displayName = '';
   String _role = ''; // parent | child
   String? _email;
   String _authProvider = 'password';
@@ -59,7 +61,7 @@ class _ProfilePageState extends State<ProfilePage> {
   List<LeaveRequestInfo> _leaveRequests = const [];
   late final GoogleSignIn _googleSignIn;
 
-  static const _meUrl = 'http://127.0.0.1:5000/me';
+  static const _meUrl = '${BackendConfig.baseUrl}/me';
 
   @override
   void initState() {
@@ -498,6 +500,8 @@ class _ProfilePageState extends State<ProfilePage> {
     final fams = (body['families'] is List) ? body['families'] as List : const <dynamic>[];
 
     final username = (user['username'] ?? _username).toString();
+    final rawDisplay = (user['display_name'] ?? _displayName).toString();
+    final displayName = rawDisplay.trim().isEmpty ? username : rawDisplay;
     final role = (user['role'] ?? _role).toString().toLowerCase();
     final emailRaw = (user['email'] ?? '').toString();
     final providerRaw = (user['auth_provider'] ?? '').toString().toLowerCase();
@@ -518,6 +522,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     setState(() {
       _username = username;
+      _displayName = displayName;
       _role = role;
       _email = emailRaw.isEmpty ? null : emailRaw;
       _authProvider = providerRaw.isEmpty ? 'password' : providerRaw;
@@ -641,11 +646,13 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _buildProfileSubtitle(bool isParent) {
     final u = _username.isEmpty ? '—' : _username;
+    final d = _displayName.isEmpty ? '—' : _displayName;
     final rolePretty = _role.isEmpty ? '—' : (_role[0].toUpperCase() + _role.substring(1));
     final famName = _familyName ?? 'None';
     final emailLine = '\nEmail: ${_email ?? '—'}';
     final famIdLine = isParent ? '\nFamily Identifier: ${_familyIdentifier ?? 'None'}' : '';
     return 'Username: $u'
+           '\nDisplay Name: $d'
            '$emailLine'
            '\nAccount Type: $rolePretty'
            '\nFamily Name: $famName$famIdLine';
@@ -959,8 +966,8 @@ class _ProfilePageState extends State<ProfilePage> {
             (req) => ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.child_care_outlined),
-              title: Text(req.childUsername),
-              subtitle: Text(_formatRequestTime(req.requestedAt)),
+              title: Text(req.displayName),
+              subtitle: Text('${_formatRequestTime(req.requestedAt)}\n@${req.childUsername}'),
               trailing: Wrap(
                 spacing: 4,
                 children: [
@@ -1001,8 +1008,10 @@ class _ProfilePageState extends State<ProfilePage> {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(member.isMaster ? Icons.star : Icons.person_outline),
-      title: Text(member.username),
-      subtitle: member.isMaster ? const Text('Master parent') : null,
+      title: Text(member.displayName),
+      subtitle: Text(
+        member.isMaster ? 'Master parent (@${member.username})' : '@${member.username}',
+      ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

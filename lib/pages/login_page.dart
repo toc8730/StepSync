@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
+import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/config/google_oauth_config.dart';
 import 'package:my_app/data/globals.dart';
 import 'package:my_app/services/preferences_service.dart';
@@ -28,8 +29,8 @@ class _LoginPageState extends State<LoginPage> {
   bool _canSignIn = false;
   bool _googleLoading = false;
 
-  final String apiUrl = "http://127.0.0.1:5000/login";
-  final String _googleLoginUrl = "http://127.0.0.1:5000/login/google";
+  final String apiUrl = "${BackendConfig.baseUrl}/login";
+  final String _googleLoginUrl = "${BackendConfig.baseUrl}/login/google";
 
   @override
   void initState() {

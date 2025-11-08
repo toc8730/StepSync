@@ -2,13 +2,14 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../config/backend_config.dart';
 import '../data/globals.dart';
 import '../models/task.dart';
 
 /// Lightweight client that talks to the Flask backend to transform a natural
 /// language prompt into concrete `Task` objects usable by the UI.
 class AiTaskGenerator {
-  static const String _baseUrl = 'http://127.0.0.1:5000';
+  static const String _baseUrl = BackendConfig.baseUrl;
 
   /// Ask the backend to generate tasks for a natural-language [prompt].
   static Future<List<Task>> fromPrompt(String prompt) async {

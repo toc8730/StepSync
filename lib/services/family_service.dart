@@ -2,10 +2,11 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../config/backend_config.dart';
 import '../data/globals.dart';
 
 class FamilyService {
-  static const String _baseUrl = 'http://127.0.0.1:5000';
+  static const String _baseUrl = BackendConfig.baseUrl;
 
   static Map<String, String> _headers() => {
         'Content-Type': 'application/json',
@@ -89,9 +90,10 @@ class FamilyService {
 }
 
 class FamilyMember {
-  FamilyMember({required this.username, this.isMaster = false});
+  const FamilyMember({required this.username, required this.displayName, this.isMaster = false});
 
   final String username;
+  final String displayName;
   final bool isMaster;
 }
 
@@ -117,6 +119,7 @@ class FamilyMembers {
           .map((element) => Map<String, dynamic>.from(element as Map))
           .map((m) => FamilyMember(
                 username: (m['username'] ?? '').toString(),
+                displayName: FamilyMembers._cleanName(m['display_name'], fallback: m['username']),
                 isMaster: parents ? (m['is_master'] == true) : false,
               ))
           .where((m) => m.username.isNotEmpty)
@@ -134,12 +137,20 @@ class FamilyMembers {
       children: _parseMembers(childrenList),
     );
   }
+
+  static String _cleanName(Object? raw, {Object? fallback}) {
+    final primary = (raw ?? '').toString().trim();
+    if (primary.isNotEmpty) return primary;
+    final fb = (fallback ?? '').toString().trim();
+    return fb.isEmpty ? '—' : fb;
+  }
 }
 
 class LeaveRequestInfo {
-  LeaveRequestInfo({required this.childUsername, this.requestedAt});
+  LeaveRequestInfo({required this.childUsername, required this.displayName, this.requestedAt});
 
   final String childUsername;
+  final String displayName;
   final DateTime? requestedAt;
 
   factory LeaveRequestInfo.fromJson(Map<String, dynamic> json) {
@@ -150,6 +161,7 @@ class LeaveRequestInfo {
     }
     return LeaveRequestInfo(
       childUsername: (json['child_username'] ?? '').toString(),
+      displayName: FamilyMembers._cleanName(json['display_name'], fallback: json['child_username']),
       requestedAt: parsed,
     );
   }

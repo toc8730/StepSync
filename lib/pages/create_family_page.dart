@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
 
 class CreateFamilyPage extends StatefulWidget {
@@ -77,7 +78,7 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
 
   print('Sending request to backend...');
   final response = await http.post(
-    Uri.parse('http://127.0.0.1:5000/family/create'),
+    Uri.parse('${BackendConfig.baseUrl}/family/create'),
     headers: {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',

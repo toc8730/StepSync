@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
 
 class JoinFamilyPage extends StatefulWidget {
@@ -40,7 +41,7 @@ class _JoinFamilyPageState extends State<JoinFamilyPage> {
     final token = AppGlobals.token;
 
     final response = await http.post(
-      Uri.parse('http://127.0.0.1:5000/family/join'),
+      Uri.parse('${BackendConfig.baseUrl}/family/join'),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',

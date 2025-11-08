@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:my_app/config/backend_config.dart';
+
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({super.key});
 
@@ -13,17 +15,19 @@ enum AccountType { parent, child }
 
 class _CreateAccountPageState extends State<CreateAccountPage> {
   final _username = TextEditingController();
+  final _displayName = TextEditingController();
   final _password = TextEditingController();
   final _confirm  = TextEditingController();
 
   bool _showPass = false;
   AccountType _type = AccountType.parent;
 
-  static const _registerUrl = 'http://127.0.0.1:5000/register';
+  static const _registerUrl = '${BackendConfig.baseUrl}/register';
 
   @override
   void dispose() {
     _username.dispose();
+    _displayName.dispose();
     _password.dispose();
     _confirm.dispose();
     super.dispose();
@@ -31,11 +35,16 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
   Future<void> _create() async {
     final u = _username.text.trim();
+    final d = _displayName.text.trim();
     final p = _password.text;
     final c = _confirm.text;
 
     if (u.isEmpty) {
       _snack('Username required');
+      return;
+    }
+    if (d.isEmpty) {
+      _snack('Display name required.');
       return;
     }
     if (p.length < 8 || p.length > 20) {
@@ -50,6 +59,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     final payload = {
       'username': u,
       'password': p,
+      'display_name': d,
       // IMPORTANT: send the exact key Flask expects
       'type': _type == AccountType.child ? 'child' : 'parent',
     };
@@ -96,6 +106,14 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            TextField(
+              controller: _displayName,
+              decoration: const InputDecoration(
+                labelText: 'Display Name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: _username,
               decoration: const InputDecoration(

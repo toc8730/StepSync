@@ -55,6 +55,7 @@ class User(db.Model):
     id           = db.Column(db.Integer, primary_key=True)
     username     = db.Column(db.String(100), unique=True, nullable=False)
     email        = db.Column(db.String(200), unique=True, nullable=True)
+    display_name = db.Column(db.String(100), nullable=True)
     password     = db.Column(db.String(200), nullable=False)  # hashed
     auth_provider = db.Column(db.String(20), nullable=False, default="password")  # "password" | "google"
     account_type = db.Column(db.Text, nullable=False)         # "parent" | "child"
@@ -95,6 +96,11 @@ with app.app_context():
             conn.execute(text("ALTER TABLE users ADD COLUMN family_joined_at TIMESTAMP"))
         with db.engine.begin() as conn:
             conn.execute(text("UPDATE users SET family_joined_at = CURRENT_TIMESTAMP WHERE family_id IS NOT NULL AND family_joined_at IS NULL"))
+    if "display_name" not in user_columns:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN display_name TEXT"))
+        with db.engine.begin() as conn:
+            conn.execute(text("UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''"))
 
 # -------------------- Helpers --------------------
 def _default_preferences() -> dict:
@@ -128,6 +134,14 @@ def _family_for_user(user: 'User') -> 'Family | None':
     if not user.family_id:
         return None
     return Family.query.filter_by(family_id=user.family_id).first()
+
+def _user_display_name(user: 'User | None') -> str:
+    if not user:
+        return ""
+    name = (user.display_name or "").strip()
+    if not name:
+        name = (user.username or "").strip()
+    return name
 
 def _current_user_from_token() -> 'User | None':
     ident = get_jwt_identity()
@@ -704,12 +718,17 @@ def _fallback_generate_tasks(prompt: str) -> list[dict]:
 def register():
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
+    display_name = (data.get("display_name") or data.get("displayName") or "").strip()
     password = data.get("password") or ""
     raw_role = (data.get("account_type") or data.get("type") or data.get("role") or "parent").strip().lower()
     account_type = "child" if raw_role == "child" else "parent"
 
     if not username:
         return jsonify({"error": "Username required"}), 400
+    if not display_name:
+        return jsonify({"error": "Display name required"}), 400
+    if len(display_name) > 100:
+        return jsonify({"error": "Display name must be at most 100 characters"}), 400
     if not (8 <= len(password) <= 20):
         return jsonify({"error": "Password must be 8–20 characters"}), 400
     if User.query.filter_by(username=username).first():
@@ -719,6 +738,7 @@ def register():
     default_profile_data = json.dumps({"schedule_blocks": [], "preferences": _default_preferences()})
     new_user = User(
         username=username,
+        display_name=display_name,
         password=hashed_pw,
         auth_provider="password",
         account_type=account_type,
@@ -726,7 +746,12 @@ def register():
     )
     db.session.add(new_user)
     db.session.commit()
-    return jsonify({"message": "User registered successfully", "username": username, "role": account_type}), 200
+    return jsonify({
+        "message": "User registered successfully",
+        "username": username,
+        "display_name": display_name,
+        "role": account_type
+    }), 200
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -743,6 +768,7 @@ def login():
         "message": "Login successful",
         "token": token,
         "username": user.username,
+        "display_name": _user_display_name(user),
         "role": user.account_type
     }), 200
 
@@ -796,6 +822,7 @@ def login_google():
         user = User(
             username=username,
             email=email,
+            display_name=display_name or username,
             password=generate_password_hash(secrets.token_urlsafe(16)),
             auth_provider="google",
             account_type=preferred_role or "parent",
@@ -810,6 +837,9 @@ def login_google():
             user.username = _unique_username(desired, exclude_user=user)
         if user.account_type not in ("parent", "child") and preferred_role:
             user.account_type = preferred_role
+        if not (user.display_name or "").strip():
+            user.display_name = display_name or user.username
+    user.display_name = display_name or _user_display_name(user)
     user.auth_provider = "google"
 
     db.session.commit()
@@ -819,6 +849,7 @@ def login_google():
         "message": "Login successful",
         "token": token,
         "username": user.username,
+        "display_name": _user_display_name(user),
         "role": user.account_type,
     }), 200
 
@@ -875,6 +906,7 @@ def me():
     return jsonify({
         "user": {
             "username": user.username,
+            "display_name": _user_display_name(user),
             "role": user.account_type,
             "email": user.email,
             "auth_provider": (user.auth_provider or "password"),
@@ -1259,9 +1291,13 @@ def family_members():
             parents.append({
                 "username": member.username,
                 "is_master": member.username == family.creator_username,
+                "display_name": _user_display_name(member),
             })
         else:
-            children.append({"username": member.username})
+            children.append({
+                "username": member.username,
+                "display_name": _user_display_name(member),
+            })
 
     pending = FamilyLeaveRequest.query.filter_by(family_id=family.family_id, status="pending").count()
     is_master = user.account_type.lower() == "parent" and user.username == family.creator_username
@@ -1347,13 +1383,14 @@ def family_leave_requests():
         family_id=family.family_id,
         status="pending",
     ).order_by(FamilyLeaveRequest.created_at.asc()).all()
-    results = [
-        {
+    results = []
+    for item in pending:
+        child = User.query.filter_by(username=item.child_username).first()
+        results.append({
             "child_username": item.child_username,
+            "display_name": _user_display_name(child),
             "requested_at": item.created_at.isoformat() if item.created_at else None,
-        }
-        for item in pending
-    ]
+        })
     return jsonify({"requests": results}), 200
 
 @app.route("/family/leave/requests/handle", methods=["POST"])

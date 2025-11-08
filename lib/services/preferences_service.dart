@@ -2,10 +2,11 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../config/backend_config.dart';
 import '../data/globals.dart';
 
 class PreferencesService {
-  static const String _baseUrl = 'http://127.0.0.1:5000';
+  static const String _baseUrl = BackendConfig.baseUrl;
 
   static Map<String, String> _headers() => {
         'Content-Type': 'application/json',
