@@ -7,10 +7,12 @@ from flask_jwt_extended import (
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import timedelta
+import re
 import json
 import os
 import secrets
 import string
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -27,6 +29,9 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
+
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # -------------------- Models --------------------
 class User(db.Model):
@@ -116,6 +121,277 @@ def _first_match_index(blocks: list, cand: dict) -> int:
         if R["title"] == C["title"] and R["title"]:
             return i
     return -1
+
+_AI_KEYWORD_STEPS = {
+    "homework": [
+        "Gather notebooks and assignment list",
+        "Work through each subject with focus blocks",
+        "Review answers and pack everything away",
+    ],
+    "exercise": [
+        "Warm up and stretch",
+        "Complete the main workout",
+        "Cool down and hydrate",
+    ],
+    "chores": [
+        "Collect supplies for the chore",
+        "Work through each area methodically",
+        "Tidy up and put supplies back",
+    ],
+    "breakfast": [
+        "Set the table and gather ingredients",
+        "Prepare and eat breakfast",
+        "Clear dishes and wipe counters",
+    ],
+    "dinner": [
+        "Prep ingredients and cookware",
+        "Cook and plate the meal",
+        "Clean the kitchen and store leftovers",
+    ],
+    "study": [
+        "Review class notes or slides",
+        "Work through practice problems",
+        "Summarize what was learned",
+    ],
+}
+
+_TIME_RE = re.compile(
+    r'(?P<hour>1[0-2]|0?[1-9])(?::(?P<minute>[0-5][0-9]))?\s*(?P<period>a\.?m\.?|p\.?m\.?|am|pm)',
+    re.IGNORECASE,
+)
+
+_AI_SYSTEM_INSTRUCTION = (
+    "You are a helpful family scheduling assistant. "
+    "Given the user's request, produce ONLY valid JSON matching this schema:\n"
+    '{"tasks":[{"title":string,"steps":string[],"startTime":string,"endTime":string,"period":"AM"|"PM"}]}.\n'
+    "Use concise task titles (<=60 chars) and 1-6 actionable steps each. "
+    "Return 3-8 tasks in chronological order, using 12-hour times like \"7:30\". "
+    "Do not include any commentary outside the JSON."
+)
+
+def _extract_text_from_gemini(payload: dict) -> str:
+    candidates = payload.get("candidates") or []
+    for cand in candidates:
+        content = cand.get("content") or {}
+        parts = content.get("parts") or []
+        for part in parts:
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+    raise RuntimeError("Gemini response did not contain text content.")
+
+def _strip_code_fence(text: str) -> str:
+    trimmed = text.strip()
+    if trimmed.startswith("```"):
+        trimmed = re.sub(r"^```(?:json)?", "", trimmed, flags=re.IGNORECASE)
+        if trimmed.endswith("```"):
+            trimmed = trimmed[:-3]
+    return trimmed.strip()
+
+def _sanitize_model_tasks(raw) -> list[dict]:
+    items = []
+    if isinstance(raw, dict):
+        if isinstance(raw.get("tasks"), list):
+            items = raw["tasks"]
+        elif isinstance(raw.get("schedule"), list):
+            items = raw["schedule"]
+    elif isinstance(raw, list):
+        items = raw
+
+    tasks: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        if not title:
+            continue
+        steps = item.get("steps")
+        if isinstance(steps, list):
+            steps = [
+                str(step).strip()
+                for step in steps
+                if isinstance(step, (str, int, float)) and str(step).strip()
+            ]
+        else:
+            steps = []
+
+        start = str(item.get("startTime", "")).strip() or None
+        end = str(item.get("endTime", "")).strip() or None
+        period = str(item.get("period", "")).strip().upper()
+        if period not in ("AM", "PM"):
+            period = None
+
+        tasks.append({
+            "title": title[:60],
+            "steps": steps,
+            "startTime": start,
+            "endTime": end,
+            "period": period,
+            "hidden": bool(item.get("hidden", False)),
+            "completed": bool(item.get("completed", False)),
+        })
+    return tasks
+
+def _call_groq_for_tasks(prompt: str) -> list[dict]:
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not set on the Flask server.")
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    body = {
+        "model": GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": _AI_SYSTEM_INSTRUCTION},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.4,
+        "max_tokens": 800,
+    }
+
+    response = requests.post(
+        url,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+        },
+        json=body,
+        timeout=30,
+    )
+    if response.status_code != 200:
+        try:
+            detail = response.json()
+        except Exception:
+            detail = response.text
+        raise RuntimeError(f"Groq HTTP {response.status_code}: {detail}")
+
+    payload = response.json()
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError("Groq response contained no choices.")
+    content = choices[0].get("message", {}).get("content", "")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("Groq response did not contain message content.")
+
+    text = _strip_code_fence(content)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Groq returned invalid JSON: {exc}") from exc
+
+    tasks = _sanitize_model_tasks(parsed)
+    if not tasks:
+        raise RuntimeError("Groq response did not contain any tasks.")
+    return tasks
+
+def _ai_chunks(prompt: str) -> list[str]:
+    cleaned = prompt.replace(' - ', '. ')
+    raw_parts = re.split(r'[.\n;]+', cleaned)
+    parts: list[str] = []
+    for fragment in raw_parts:
+        fragment = fragment.strip(' ,')
+        if fragment:
+            parts.append(fragment)
+    return parts
+
+def _starting_clock(prompt: str) -> tuple[int, int]:
+    lower = prompt.lower()
+    if "evening" in lower or "night" in lower:
+        return 18, 0
+    if "afternoon" in lower or "after school" in lower:
+        return 13, 0
+    if "morning" in lower or "before school" in lower or "wake" in lower:
+        return 7, 0
+    return 8, 0
+
+def _format_time(hour24: int, minute: int) -> tuple[str, str]:
+    period = 'PM' if hour24 >= 12 else 'AM'
+    hour12 = hour24 % 12
+    if hour12 == 0:
+        hour12 = 12
+    return f"{hour12}:{minute:02d}", period
+
+def _advance_clock(hour24: int, minute: int, delta_minutes: int) -> tuple[int, int]:
+    total = hour24 * 60 + minute + delta_minutes
+    total %= (24 * 60)
+    return total // 60, total % 60
+
+def _extract_time_from_chunk(chunk: str) -> tuple[int | None, int | None, str]:
+    match = _TIME_RE.search(chunk)
+    if not match:
+        return None, None, chunk
+    hour = int(match.group('hour'))
+    minute = int(match.group('minute') or 0)
+    period = match.group('period').lower()
+    if period.startswith('p') and hour != 12:
+        hour += 12
+    if period.startswith('a') and hour == 12:
+        hour = 0
+    cleaned = _TIME_RE.sub('', chunk)
+    cleaned = re.sub(r'\bat\b', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip(' ,')
+    return hour, minute, cleaned if cleaned else chunk
+
+def _title_from_chunk(chunk: str, index: int) -> str:
+    cleaned = re.sub(r'[^A-Za-z0-9 &/:-]', '', chunk).strip()
+    if not cleaned:
+        cleaned = f"Task {index + 1}"
+    return cleaned[:60].strip().title()
+
+def _steps_from_chunk(chunk: str, title: str) -> list[str]:
+    lower = chunk.lower()
+    for keyword, steps in _AI_KEYWORD_STEPS.items():
+        if keyword in lower:
+            return steps
+    topic = title.lower()
+    return [
+        f"Plan what is needed for {topic}",
+        f"Work through the main part of {topic}",
+        f"Review progress and clean up after {topic}",
+    ]
+
+def _ai_generate_tasks(prompt: str) -> list[dict]:
+    if GROQ_API_KEY:
+        try:
+            return _call_groq_for_tasks(prompt)
+        except Exception as exc:
+            app.logger.warning("Groq generation failed, using heuristic fallback: %s", exc)
+    else:
+        app.logger.warning("GROQ_API_KEY missing; using heuristic fallback.")
+
+    return _fallback_generate_tasks(prompt)
+
+def _fallback_generate_tasks(prompt: str) -> list[dict]:
+    parts = _ai_chunks(prompt)
+    if not parts:
+        parts = ["Plan the day", "Focus block", "Wrap up and reflect"]
+
+    max_items = min(len(parts), 8)
+    hour, minute = _starting_clock(prompt)
+    tasks: list[dict] = []
+
+    for idx, raw_chunk in enumerate(parts[:max_items]):
+        custom_hour, custom_minute, cleaned_chunk = _extract_time_from_chunk(raw_chunk)
+        if custom_hour is not None:
+            hour, minute = custom_hour, custom_minute
+
+        title = _title_from_chunk(cleaned_chunk, idx)
+        steps = _steps_from_chunk(cleaned_chunk, title)
+        start_str, period = _format_time(hour, minute)
+        end_hour, end_minute = _advance_clock(hour, minute, 45)
+        end_str, _ = _format_time(end_hour, end_minute)
+
+        tasks.append({
+            "title": title,
+            "steps": steps,
+            "startTime": start_str,
+            "endTime": end_str,
+            "period": period,
+            "hidden": False,
+            "completed": False,
+        })
+
+        hour, minute = end_hour, end_minute
+
+    return tasks
 
 # -------------------- Auth --------------------
 @app.route("/register", methods=["POST"])
@@ -330,6 +606,22 @@ def block_delete():
         return jsonify({"error": "Block not found"}), 404
 
     return jsonify({"error": "Provide 'index' or 'block'"}), 400
+
+# -------------------- AI Task Generation --------------------
+@app.route("/ai/tasks", methods=["POST"])
+@jwt_required()
+def ai_tasks():
+    payload = request.get_json(silent=True) or {}
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "Prompt is required."}), 400
+
+    tasks = _ai_generate_tasks(prompt)
+    return jsonify({
+        "prompt": prompt,
+        "tasks": tasks,
+        "count": len(tasks),
+    }), 200
 
 # -------------------- Families --------------------
 @app.route("/family/create", methods=["POST"])
