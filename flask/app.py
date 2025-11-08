@@ -7,6 +7,7 @@ from flask_jwt_extended import (
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import timedelta
+from sqlalchemy import inspect, text
 import re
 import json
 import os
@@ -33,11 +34,27 @@ jwt = JWTManager(app)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 
+def _load_google_client_ids() -> set[str]:
+    """
+    Collect all OAuth client IDs we trust for Google sign-in.
+    This lets the backend accept tokens minted for any of the runtime-configured IDs.
+    """
+    raw = os.environ.get("GOOGLE_CLIENT_IDS", "")
+    ids = {cid.strip() for cid in raw.split(",") if cid.strip()}
+    for key in ("GOOGLE_WEB_CLIENT_ID", "GOOGLE_ANDROID_CLIENT_ID", "GOOGLE_IOS_CLIENT_ID"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            ids.add(val)
+    return ids
+
+GOOGLE_CLIENT_IDS = _load_google_client_ids()
+
 # -------------------- Models --------------------
 class User(db.Model):
     __tablename__ = "users"
     id           = db.Column(db.Integer, primary_key=True)
     username     = db.Column(db.String(100), unique=True, nullable=False)
+    email        = db.Column(db.String(200), unique=True, nullable=True)
     password     = db.Column(db.String(200), nullable=False)  # hashed
     account_type = db.Column(db.Text, nullable=False)         # "parent" | "child"
     profile_data = db.Column(db.Text)                         # JSON string
@@ -53,6 +70,11 @@ class Family(db.Model):
 
 with app.app_context():
     db.create_all()
+    _insp = inspect(db.engine)
+    user_columns = {col["name"] for col in _insp.get_columns("users")}
+    if "email" not in user_columns:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email TEXT"))
 
 # -------------------- Helpers --------------------
 def _default_preferences() -> dict:
@@ -149,6 +171,51 @@ def _resolve_schedule_user(user: 'User', target_child: str | None):
         return child
     owner, _ = _schedule_owner(user)
     return owner
+
+def _verify_google_id_token(id_token: str) -> dict | None:
+    if not id_token:
+        return None
+    try:
+        resp = requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": id_token},
+            timeout=8,
+        )
+    except requests.RequestException:
+        return None
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    aud = data.get("aud", "")
+    if GOOGLE_CLIENT_IDS and aud not in GOOGLE_CLIENT_IDS:
+        return None
+    if data.get("email_verified") not in ("true", True, 1, "1"):
+        return None
+    return data
+
+def _clean_display_name(*candidates: str) -> str:
+    for raw in candidates:
+        name = (raw or "").strip()
+        if not name:
+            continue
+        name = re.sub(r"\s+", " ", name)
+        if name:
+            return name[:80]
+    return ""
+
+def _unique_username(base: str, *, exclude_user: 'User | None' = None) -> str:
+    base = base or "user"
+    base = base.strip()
+    candidate = base
+    counter = 2
+    while True:
+        query = User.query.filter_by(username=candidate)
+        if exclude_user is not None:
+            query = query.filter(User.id != exclude_user.id)
+        if not query.first():
+            return candidate
+        candidate = f"{base} {counter}"
+        counter += 1
 
 def _norm_block(b: dict | None) -> dict:
     """Normalize a block dict so matching is tolerant of missing keys/whitespace/case."""
@@ -516,6 +583,76 @@ def login():
         "token": token,
         "username": user.username,
         "role": user.account_type
+    }), 200
+
+@app.route("/login/google", methods=["POST"])
+def login_google():
+    data = request.get_json(silent=True) or {}
+    id_token = (data.get("id_token") or "").strip()
+    preferred_raw = (data.get("preferred_role") or "").strip().lower()
+    if preferred_raw in ("parent", "child"):
+        preferred_role: str | None = preferred_raw
+    else:
+        preferred_role = None
+    if not id_token:
+        return jsonify({"error": "id_token required"}), 400
+
+    info = _verify_google_id_token(id_token)
+    if not info:
+        return jsonify({"error": "Invalid Google token"}), 401
+
+    email = (info.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "Google account missing email"}), 400
+
+    display_name = _clean_display_name(
+        info.get("name"),
+        info.get("given_name"),
+        email.split("@")[0] if "@" in email else email,
+    )
+    if not display_name:
+        display_name = email.split("@")[0] if "@" in email else email
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        user = User.query.filter_by(username=email).first()
+        if user:
+            user.email = email
+    if not user and preferred_role is None:
+        return jsonify({
+            "error": "role_required",
+            "needs_role": True,
+            "message": "Select whether this Google account should be parent or child.",
+        }), 412
+
+    if not user:
+        default_profile_data = json.dumps({"schedule_blocks": [], "preferences": _default_preferences()})
+        username = _unique_username(display_name or email)
+        user = User(
+            username=username,
+            email=email,
+            password=generate_password_hash(secrets.token_urlsafe(16)),
+            account_type=preferred_role or "parent",
+            profile_data=default_profile_data,
+        )
+        db.session.add(user)
+    else:
+        if not user.email:
+            user.email = email
+        if (user.username or "").strip().lower() == email or "@" in (user.username or ""):
+            desired = display_name or email
+            user.username = _unique_username(desired, exclude_user=user)
+        if user.account_type not in ("parent", "child") and preferred_role:
+            user.account_type = preferred_role
+
+    db.session.commit()
+
+    token = create_access_token(identity=user.username)
+    return jsonify({
+        "message": "Login successful",
+        "token": token,
+        "username": user.username,
+        "role": user.account_type,
     }), 200
 
 # -------------------- Profile / Me --------------------
