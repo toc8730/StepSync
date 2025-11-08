@@ -146,7 +146,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
             const SizedBox(height: 24),
             Center(
               child: FilledButton(
-                onPressed: _create,
+                onPressed: () => _create(),
                 child: const Text('Create Account'),
               ),
             )

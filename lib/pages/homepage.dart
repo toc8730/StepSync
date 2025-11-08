@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:my_app/data/globals.dart';
 import '../task_controller.dart';
 import '../models/task.dart';
+import '../services/family_service.dart';
 
 import '../widgets/task_editor_dialog.dart';
 import '../widgets/template_picker_dialog.dart';
@@ -27,12 +28,17 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final TaskController _ctrl;
   static const _base = 'http://127.0.0.1:5000';
+  String? _selectedChild;
+  List<FamilyMember> _children = const <FamilyMember>[];
+  bool _childrenLoading = false;
+  String? _childrenError;
 
   @override
   void initState() {
     super.initState();
     _ctrl = TaskController();
     _loadFromServer();
+    _loadChildren();
   }
 
   Map<String, String> get _jsonHeaders => {
@@ -42,16 +48,18 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadFromServer() async {
     try {
-      final res = await http.get(Uri.parse('$_base/profile'), headers: _jsonHeaders);
+      final uri = _buildProfileUri();
+      final res = await http.get(uri, headers: _jsonHeaders);
       if (res.statusCode != 200) {
         _toast('Failed to load profile: ${res.statusCode}');
         return;
       }
       final body = json.decode(res.body) as Map<String, dynamic>;
       final blocks = (body['schedule_blocks'] as List? ?? const []);
+      final tasks = <Task>[];
       for (final b in blocks) {
         final m = (b as Map).cast<String, dynamic>();
-        _ctrl.load(
+        tasks.add(
           Task(
             title: (m['title'] ?? '').toString(),
             startTime: (m['startTime'] ?? '').toString().isEmpty ? null : (m['startTime'] as String),
@@ -60,13 +68,23 @@ class _HomePageState extends State<HomePage> {
             steps: (m['steps'] is List) ? List<String>.from(m['steps'] as List) : const <String>[],
             hidden: (m['hidden'] is bool) ? m['hidden'] as bool : false,
             completed: (m['completed'] is bool) ? m['completed'] as bool : false,
+            familyTag: ((m['family_tag'] ?? '').toString().isEmpty ? null : m['family_tag'].toString()),
           ),
         );
       }
-      setState(() {});
+      _ctrl.replaceAll(tasks);
     } catch (e) {
       _toast('Load error: $e');
     }
+  }
+
+  Uri _buildProfileUri() {
+    final target = _selectedChild;
+    if (target == null || target.isEmpty) {
+      return Uri.parse('$_base/profile');
+    }
+    final encoded = Uri.encodeComponent(target);
+    return Uri.parse('$_base/profile?target_child=$encoded');
   }
 
   Map<String, dynamic> _taskToBlock(Task t) => <String, dynamic>{
@@ -77,6 +95,7 @@ class _HomePageState extends State<HomePage> {
         'steps': t.steps,
         'hidden': t.hidden,
         'completed': t.completed,
+        'family_tag': t.familyTag,
       };
 
   Future<void> _serverAdd(Task t) async {
@@ -84,23 +103,45 @@ class _HomePageState extends State<HomePage> {
       final res = await http.post(
         Uri.parse('$_base/profile/block/add'),
         headers: _jsonHeaders,
-        body: json.encode({'block': _taskToBlock(t)}),
+        body: json.encode(
+          _withTarget(
+            {'block': _taskToBlock(t)},
+            forFamily: _isFamilyMode,
+          ),
+        ),
       );
-      if (res.statusCode != 200) _toast('Server add failed (${res.statusCode})');
+      if (res.statusCode == 200 && _isFamilyMode) {
+        try {
+          final data = json.decode(res.body);
+          if (data is Map && data['family_tag'] is String) {
+            final tag = data['family_tag'].toString().trim();
+            t.familyTag = tag.isEmpty ? null : tag;
+          }
+        } catch (_) {}
+      } else if (res.statusCode != 200) {
+        _toast('Server add failed (${res.statusCode})');
+      }
     } catch (e) {
       _toast('Add error: $e');
     }
   }
 
   Future<void> _serverEdit(Task oldT, Task newT) async {
+    final forFamily = _isFamilyMode && (oldT.familyTag?.isNotEmpty ?? false);
     try {
       final res = await http.post(
         Uri.parse('$_base/profile/block/edit'),
         headers: _jsonHeaders,
-        body: json.encode({
-          'old_block': _taskToBlock(oldT),
-          'new_block': _taskToBlock(newT),
-        }),
+        body: json.encode(
+          _withTarget(
+            {
+              'old_block': _taskToBlock(oldT),
+              'new_block': _taskToBlock(newT),
+            },
+            forFamily: forFamily,
+            familyTag: oldT.familyTag,
+          ),
+        ),
       );
       if (res.statusCode != 200) _toast('Server edit failed (${res.statusCode})');
     } catch (e) {
@@ -109,11 +150,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _serverRemove(Task t) async {
+    final forFamily = _isFamilyMode && (t.familyTag?.isNotEmpty ?? false);
     try {
       final res = await http.post(
         Uri.parse('$_base/profile/block/delete'),
         headers: _jsonHeaders,
-        body: json.encode({'block': _taskToBlock(t)}),
+        body: json.encode(
+          _withTarget(
+            {'block': _taskToBlock(t)},
+            forFamily: forFamily,
+            familyTag: t.familyTag,
+          ),
+        ),
       );
       if (res.statusCode != 200) _toast('Server delete failed (${res.statusCode})');
     } catch (e) {
@@ -121,11 +169,80 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _loadChildren() async {
+    setState(() {
+      _childrenLoading = true;
+      _childrenError = null;
+    });
+    try {
+      final members = await FamilyService.fetchMembers();
+      if (!mounted) return;
+      final children = members?.children ?? const [];
+      final missingSelection = _selectedChild != null && children.every((c) => c.username != _selectedChild);
+      setState(() {
+        _children = children;
+        _childrenLoading = false;
+        _childrenError = members == null ? 'Unable to load family info.' : null;
+        if (missingSelection || children.isEmpty) _selectedChild = null;
+      });
+      if (missingSelection) _loadFromServer();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _childrenLoading = false;
+        _childrenError = 'Failed to load children: $e';
+      });
+    }
+  }
+
+  Future<void> _changeAssignee(String? child) async {
+    if (_selectedChild == child) return;
+    setState(() => _selectedChild = child);
+    await _loadFromServer();
+  }
+
+  Map<String, dynamic> _withTarget(
+    Map<String, dynamic> payload, {
+    bool forFamily = false,
+    String? familyTag,
+  }) {
+    final map = Map<String, dynamic>.from(payload);
+    if (forFamily) {
+      map['apply_to_family'] = true;
+      final tag = (familyTag ?? _extractFamilyTag(map))?.trim();
+      if (tag != null && tag.isNotEmpty) {
+        map['family_tag'] = tag;
+      }
+    } else if (_selectedChild != null && _selectedChild!.isNotEmpty) {
+      map['target_child'] = _selectedChild;
+    }
+    return map;
+  }
+
+  String? _extractFamilyTag(Map<String, dynamic> payload) {
+    for (final value in payload.values) {
+      if (value is Map && value['family_tag'] is String) {
+        final tag = value['family_tag'].toString().trim();
+        if (tag.isNotEmpty) return tag;
+      }
+    }
+    return null;
+  }
+
+  String get _assigneeLabel {
+    if (_selectedChild != null && _selectedChild!.isNotEmpty) return _selectedChild!;
+    if (_children.isEmpty) return 'Family schedule';
+    return 'Family schedule (all children)';
+  }
+
   Future<void> _handleMenuSelect(String value) async {
     switch (value) {
       case 'profile':
         if (!mounted) return;
         await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfilePage()));
+        if (!mounted) return;
+        _loadChildren();
+        _loadFromServer();
         break;
       case 'signout':
         if (!mounted) return;
@@ -181,15 +298,23 @@ class _HomePageState extends State<HomePage> {
         actions: [
           Tooltip(
             message: 'Ask AI to generate tasks',
-            child: IconButton(icon: const Icon(Icons.auto_fix_high), onPressed: _askAi),
+            child: IconButton(
+              icon: const Icon(Icons.auto_fix_high),
+              onPressed: _canAssign ? () => _askAi() : null,
+            ),
           ),
           Tooltip(
             message: 'Choose a premade task',
-            child: IconButton(icon: const Icon(Icons.auto_awesome), onPressed: _addFromTemplate),
+            child: IconButton(
+              icon: const Icon(Icons.auto_awesome),
+              onPressed: _canAssign ? () => _addFromTemplate() : null,
+            ),
           ),
           PopupMenuButton<String>(
             tooltip: 'Menu',
-            onSelected: _handleMenuSelect,
+            onSelected: (value) {
+              _handleMenuSelect(value);
+            },
             itemBuilder: (context) => const [
               PopupMenuItem(
                 value: 'profile',
@@ -211,16 +336,24 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (_, __) => _ParentTasksSectionWithSync(
-          ctrl: _ctrl,
-          onEdited: _onEdit,
-          onDeleted: _onDelete,
-        ),
+      body: Column(
+        children: [
+          _assignmentBanner(),
+          Expanded(
+            child: AnimatedBuilder(
+              animation: _ctrl,
+              builder: (_, __) => _ParentTasksSectionWithSync(
+                ctrl: _ctrl,
+                onEdited: _onEdit,
+                onDeleted: _onDelete,
+                familyMode: _isFamilyMode,
+              ),
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addTask,
+        onPressed: _canAssign ? () => _addTask() : null,
         child: const Icon(Icons.add),
       ),
     );
@@ -241,6 +374,70 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
+  Widget _assignmentBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+        border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "You're currently assigning tasks to $_assigneeLabel",
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          if (_childrenLoading)
+            const LinearProgressIndicator(minHeight: 2)
+          else if (_children.isEmpty)
+            const Text('No children linked to this family yet.')
+          else
+            DropdownButton<String?>(
+              value: _selectedChild,
+              isExpanded: true,
+              underline: const SizedBox.shrink(),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('Family schedule (all children)')),
+                ..._children.map(
+                  (child) => DropdownMenuItem<String?>(
+                    value: child.username,
+                    child: Text(child.username),
+                  ),
+                ),
+              ],
+              onChanged: _childrenLoading
+                  ? null
+                  : (value) {
+                      _changeAssignee(value);
+                    },
+            ),
+          if (_isFamilyMode && _children.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Family schedule will create or remove this task for every child.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          if (_childrenError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                _childrenError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              ),
+            )
+        ],
+      ),
+    );
+  }
+
+  bool get _isFamilyMode => _children.isNotEmpty && (_selectedChild == null || _selectedChild!.isEmpty);
+  bool get _canAssign => true;
 }
 
 class _ParentTasksSectionWithSync extends StatelessWidget {
@@ -248,11 +445,13 @@ class _ParentTasksSectionWithSync extends StatelessWidget {
     required this.ctrl,
     required this.onEdited,
     required this.onDeleted,
+    required this.familyMode,
   });
 
   final TaskController ctrl;
   final Future<void> Function(Task before, Task after) onEdited;
   final Future<void> Function(Task t) onDeleted;
+  final bool familyMode;
 
   @override
   Widget build(BuildContext context) {
@@ -327,34 +526,14 @@ class _ParentTasksSectionWithSync extends StatelessWidget {
       const SizedBox(height: 8),
       ...List.generate(items.length, (i) {
         final t = items[i] as Task;
+        final isFamilyTask = (t.familyTag?.isNotEmpty ?? false);
+        final canMutate = !familyMode || isFamilyTask;
         return TaskTile(
           task: t,
           strikeThroughWhenCompleted: strikeThroughWhenCompleted,
-          onToggle: () async {
-            final idx = ctrl.all.indexOf(t);
-            if (idx == -1) return;
-            final before = _cloneTask(ctrl.all[idx]);
-            ctrl.toggleCompleted(idx);
-            await onEdited(before, ctrl.all[idx]);
-          },
-          onEdit: () async {
-            final idx = ctrl.all.indexOf(t);
-            if (idx == -1) return;
-            final before = ctrl.all[idx];
-            final edited = await TaskEditorDialog.show(context, initial: t);
-            if (edited != null) {
-              ctrl.update(idx, edited);
-              await onEdited(before, edited);
-            }
-          },
-          onDelete: () async {
-            final idx = ctrl.all.indexOf(t);
-            if (idx != -1) {
-              final toRemove = ctrl.all[idx];
-              ctrl.removeAt(idx);
-              await onDeleted(toRemove);
-            }
-          },
+          onToggle: familyMode ? () {} : () => _handleToggle(t),
+          onEdit: canMutate ? () => _handleEdit(context, t) : null,
+          onDelete: canMutate ? () => _handleDelete(t) : null,
           onOpen: () {
             Navigator.of(context).push(
               MaterialPageRoute(
@@ -369,6 +548,33 @@ class _ParentTasksSectionWithSync extends StatelessWidget {
       }),
     ];
   }
+
+  void _handleToggle(Task t) {
+    final idx = ctrl.all.indexOf(t);
+    if (idx == -1) return;
+    final before = _cloneTask(ctrl.all[idx]);
+    ctrl.toggleCompleted(idx);
+    onEdited(before, ctrl.all[idx]);
+  }
+
+  Future<void> _handleEdit(BuildContext context, Task t) async {
+    final idx = ctrl.all.indexOf(t);
+    if (idx == -1) return;
+    final before = ctrl.all[idx];
+    final edited = await TaskEditorDialog.show(context, initial: t);
+    if (edited != null) {
+      ctrl.update(idx, edited);
+      onEdited(before, edited);
+    }
+  }
+
+  void _handleDelete(Task t) {
+    final idx = ctrl.all.indexOf(t);
+    if (idx == -1) return;
+    final toRemove = ctrl.all[idx];
+    ctrl.removeAt(idx);
+    onDeleted(toRemove);
+  }
 }
 
 Task _cloneTask(Task t) => Task(
@@ -379,4 +585,5 @@ Task _cloneTask(Task t) => Task(
       period: t.period,
       hidden: t.hidden,
       completed: t.completed,
+      familyTag: t.familyTag,
     );

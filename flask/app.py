@@ -82,6 +82,74 @@ def _rand_family_id(n: int = 10) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(n))
 
+def _family_for_user(user: 'User') -> 'Family | None':
+    if not user.family_id:
+        return None
+    return Family.query.filter_by(family_id=user.family_id).first()
+
+def _schedule_owner(user: 'User') -> tuple['User', bool]:
+    is_master = True
+    owner = user
+    if user.account_type.lower() == "parent" and user.family_id:
+        family = _family_for_user(user)
+        if family:
+            master = User.query.filter_by(username=family.creator_username).first()
+            if master:
+                owner = master
+                is_master = (master.username == user.username)
+    return owner, is_master
+
+def _family_children(family: 'Family') -> list['User']:
+    members = User.query.filter_by(family_id=family.family_id).all()
+    return [m for m in members if m.account_type.lower() == "child"]
+
+def _append_block_to_user(user: 'User', block: dict) -> None:
+    prof = _safe_profile_dict(user.profile_data)
+    prof["schedule_blocks"].append(dict(block))
+    user.profile_data = json.dumps(prof)
+
+def _update_block_with_tag(user: 'User', tag: str, new_block: dict) -> bool:
+    tag = (tag or "").strip()
+    if not tag:
+        return False
+    prof = _safe_profile_dict(user.profile_data)
+    updated = False
+    for idx, blk in enumerate(prof["schedule_blocks"]):
+        if (blk.get("family_tag") or "").strip() == tag:
+            prof["schedule_blocks"][idx] = dict(new_block)
+            updated = True
+    if updated:
+        user.profile_data = json.dumps(prof)
+    return updated
+
+def _remove_family_tag_from_user(user: 'User', tag: str) -> bool:
+    tag = (tag or "").strip()
+    if not tag:
+        return False
+    prof = _safe_profile_dict(user.profile_data)
+    blocks = prof["schedule_blocks"]
+    new_blocks = [b for b in blocks if (b.get("family_tag") or "").strip() != tag]
+    if len(new_blocks) == len(blocks):
+        return False
+    prof["schedule_blocks"] = new_blocks
+    user.profile_data = json.dumps(prof)
+    return True
+
+def _resolve_schedule_user(user: 'User', target_child: str | None):
+    target = (target_child or '').strip()
+    if target:
+        if user.account_type.lower() != "parent":
+            raise ValueError("Only parents can assign tasks to a child")
+        family = _family_for_user(user)
+        if not family:
+            raise ValueError("Parent is not linked to a family")
+        child = User.query.filter_by(username=target).first()
+        if not child or child.account_type.lower() != "child" or child.family_id != family.family_id:
+            raise ValueError("Child not found in your family")
+        return child
+    owner, _ = _schedule_owner(user)
+    return owner
+
 def _norm_block(b: dict | None) -> dict:
     """Normalize a block dict so matching is tolerant of missing keys/whitespace/case."""
     b = b or {}
@@ -102,6 +170,7 @@ def _norm_block(b: dict | None) -> dict:
         "steps": steps,
         "hidden": bool(b.get("hidden", False)),
         "completed": bool(b.get("completed", False)),
+        "family_tag": s(b.get("family_tag")),
     }
 
 def _first_match_index(blocks: list, cand: dict) -> int:
@@ -457,7 +526,13 @@ def profile_get():
     user = User.query.filter_by(username=current_user).first()
     if not user:
         return jsonify({"error": "User not found"}), 404
-    return jsonify(_safe_profile_dict(user.profile_data)), 200
+    target_child = request.args.get("target_child")
+    try:
+        schedule_user = _resolve_schedule_user(user, target_child)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(_safe_profile_dict(schedule_user.profile_data)), 200
 
 # get the profile of the head of the family (used for saving blocks from the parent to the child account)
 @app.route("/profile/family", methods=["GET"])
@@ -508,14 +583,40 @@ def block_add():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
+    if user.account_type.lower() == "child":
+        return jsonify({"error": "Children cannot add tasks"}), 403
+
     payload = request.get_json(silent=True) or {}
-    if "block" not in payload or not isinstance(payload["block"], dict):
+    block_payload = payload.get("block")
+    if not isinstance(block_payload, dict):
         return jsonify({"error": "Missing 'block'"}), 400
 
-    prof = _safe_profile_dict(user.profile_data)
-    # normalize before storing so matching is consistent later
-    prof["schedule_blocks"].append(_norm_block(payload["block"]))
-    user.profile_data = json.dumps(prof)
+    apply_family = bool(payload.get("apply_to_family"))
+    if apply_family:
+        family = _family_for_user(user)
+        if not family:
+            return jsonify({"error": "Join a family to assign to all children"}), 400
+        children = _family_children(family)
+        if not children:
+            return jsonify({"error": "No children available in this family"}), 400
+        family_tag = (payload.get("family_tag") or "").strip() or f"fam-{secrets.token_hex(8)}"
+        normalized = _norm_block(block_payload)
+        normalized["family_tag"] = family_tag
+        owner, _ = _schedule_owner(user)
+        _append_block_to_user(owner, normalized)
+        for child in children:
+            _append_block_to_user(child, normalized)
+        db.session.commit()
+        return jsonify({"message": "Family task added", "family_tag": family_tag}), 200
+
+    try:
+        schedule_user = _resolve_schedule_user(user, payload.get("target_child"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    prof = _safe_profile_dict(schedule_user.profile_data)
+    prof["schedule_blocks"].append(_norm_block(block_payload))
+    schedule_user.profile_data = json.dumps(prof)
     db.session.commit()
     return jsonify({"message": "Block add successful"}), 200
 
@@ -533,50 +634,42 @@ def block_edit():
     if old_block is None or new_block is None:
         return jsonify({"error": "Missing 'old_block' or 'new_block'"}), 400
 
-    prof = _safe_profile_dict(user.profile_data)
+    if payload.get("apply_to_family"):
+        family = _family_for_user(user)
+        if not family:
+            return jsonify({"error": "Join a family to edit this task"}), 400
+        tag = (payload.get("family_tag") or "").strip()
+        if not tag and isinstance(old_block, dict):
+            tag = (old_block.get("family_tag") or "").strip()
+        if not tag and isinstance(new_block, dict):
+            tag = (new_block.get("family_tag") or "").strip()
+        if not tag:
+            return jsonify({"error": "Family task identifier missing"}), 400
+        normalized = _norm_block(new_block)
+        normalized["family_tag"] = tag
+        owner, _ = _schedule_owner(user)
+        changed = _update_block_with_tag(owner, tag, normalized)
+        for child in _family_children(family):
+            changed = _update_block_with_tag(child, tag, normalized) or changed
+        if not changed:
+            return jsonify({"error": "Family task not found"}), 404
+        db.session.commit()
+        return jsonify({"message": "Family block edit successful"}), 200
+
+    try:
+        schedule_user = _resolve_schedule_user(user, payload.get("target_child"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    prof = _safe_profile_dict(schedule_user.profile_data)
     idx = _first_match_index(prof["schedule_blocks"], old_block)
     if idx < 0:
         return jsonify({"error": "Old block not found"}), 404
 
     prof["schedule_blocks"][idx] = _norm_block(new_block)
-    user.profile_data = json.dumps(prof)
+    schedule_user.profile_data = json.dumps(prof)
     db.session.commit()
     return jsonify({"message": "Block edit successful"}), 200
-
-@app.route("/profile/family/block/edit", methods=["POST"])
-@jwt_required()
-def family_block_edit():
-    current_user = get_jwt_identity()
-    user = User.query.filter_by(username=current_user).first()
-    if not user:
-        return jsonify({"error": "User not found"}), 404
-
-    if not user.family_id:
-        return jsonify({"error": "User not linked to a family"}), 400
-
-    family = Family.query.filter_by(family_id=user.family_id).first()
-    if not family:
-        return jsonify({"error": "Family not found"}), 404
-
-    parent = User.query.filter_by(username=family.creator_username).first()
-    if not parent:
-        return jsonify({"error": "Family head not found"}), 404
-
-    payload = request.get_json(silent=True) or {}
-    old_block = payload.get("old_block")
-    new_block = payload.get("new_block")
-    if old_block is None or new_block is None:
-        return jsonify({"error": "Missing 'old_block' or 'new_block'"}), 400
-
-    prof = _safe_profile_dict(parent.profile_data)
-    idx = _first_match_index(prof["schedule_blocks"], old_block)
-    if idx < 0:
-        return jsonify({"error": "Old block not found"}), 404
-
-    prof["schedule_blocks"][idx] = _norm_block(new_block)
-    parent.profile_data = json.dumps(prof)
-    db.session.commit()
-    return jsonify({"message": "Family block edit successful"}), 200
 
 @app.route("/profile/block/delete", methods=["POST"])
 @jwt_required()
@@ -591,7 +684,30 @@ def block_delete():
         return jsonify({"error": "Children cannot delete tasks"}), 403
 
     payload = request.get_json(silent=True) or {}
-    prof = _safe_profile_dict(user.profile_data)
+    if bool(payload.get("apply_to_family")):
+        family = _family_for_user(user)
+        if not family:
+            return jsonify({"error": "Join a family to manage family-wide tasks"}), 400
+        tag = (payload.get("family_tag") or "").strip()
+        if not tag and isinstance(payload.get("block"), dict):
+            tag = (payload["block"].get("family_tag") or "").strip()
+        if not tag:
+            return jsonify({"error": "Family task identifier missing"}), 400
+        owner, _ = _schedule_owner(user)
+        changed = _remove_family_tag_from_user(owner, tag)
+        for child in _family_children(family):
+            changed = _remove_family_tag_from_user(child, tag) or changed
+        if not changed:
+            return jsonify({"error": "Family task not found"}), 404
+        db.session.commit()
+        return jsonify({"message": "Family task removed"}), 200
+
+    try:
+        schedule_user = _resolve_schedule_user(user, payload.get("target_child"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    prof = _safe_profile_dict(schedule_user.profile_data)
     blocks = prof["schedule_blocks"]
 
     # delete by index (if provided)
@@ -599,7 +715,7 @@ def block_delete():
         i = payload["index"]
         if 0 <= i < len(blocks):
             removed = blocks.pop(i)
-            user.profile_data = json.dumps(prof)
+            schedule_user.profile_data = json.dumps(prof)
             db.session.commit()
             return jsonify({"message": "Deleted", "deleted": removed}), 200
         return jsonify({"error": "Index out of range"}), 400
@@ -610,7 +726,7 @@ def block_delete():
         idx = _first_match_index(blocks, cand)
         if idx >= 0:
             removed = blocks.pop(idx)
-            user.profile_data = json.dumps(prof)
+            schedule_user.profile_data = json.dumps(prof)
             db.session.commit()
             return jsonify({"message": "Deleted", "deleted": removed}), 200
         return jsonify({"error": "Block not found"}), 404
@@ -705,6 +821,105 @@ def join_family():
     user.family_id = family_id
     db.session.commit()
     return jsonify({"message": "Joined family successfully"}), 200
+
+@app.route("/family/members", methods=["GET"])
+@jwt_required()
+def family_members():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "User is not part of a family"}), 400
+
+    members = User.query.filter_by(family_id=family.family_id).all()
+    parents = []
+    children = []
+    for member in members:
+        role = member.account_type.lower()
+        if role == "parent":
+            parents.append({
+                "username": member.username,
+                "is_master": member.username == family.creator_username,
+            })
+        else:
+            children.append({"username": member.username})
+
+    is_master = user.account_type.lower() == "parent" and user.username == family.creator_username
+    return jsonify({
+        "family_id": family.family_id,
+        "is_master": is_master,
+        "parents": parents,
+        "children": children,
+    }), 200
+
+@app.route("/family/member/remove", methods=["POST"])
+@jwt_required()
+def family_member_remove():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "User is not part of a family"}), 400
+    if user.account_type.lower() != "parent" or user.username != family.creator_username:
+        return jsonify({"error": "Only the master parent can remove members"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    target_username = (payload.get("username") or "").strip()
+    if not target_username:
+        return jsonify({"error": "Username is required"}), 400
+    if target_username == user.username:
+        return jsonify({"error": "Master parent cannot remove themselves"}), 400
+
+    target = User.query.filter_by(username=target_username).first()
+    if not target or target.family_id != family.family_id:
+        return jsonify({"error": "User is not part of this family"}), 404
+
+    target.family_id = None
+    db.session.commit()
+    return jsonify({"message": f"Removed {target_username} from family"}), 200
+
+@app.route("/family/master/transfer", methods=["POST"])
+@jwt_required()
+def family_transfer_master():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "User is not part of a family"}), 400
+    if user.account_type.lower() != "parent" or user.username != family.creator_username:
+        return jsonify({"error": "Only the master parent can transfer ownership"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    target_username = (payload.get("username") or "").strip()
+    if not target_username:
+        return jsonify({"error": "Username is required"}), 400
+    if target_username == user.username:
+        return jsonify({"error": "Target must be a different parent"}), 400
+
+    target = User.query.filter_by(username=target_username).first()
+    if not target or target.family_id != family.family_id:
+        return jsonify({"error": "User is not part of this family"}), 404
+    if target.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can become master"}), 400
+
+    master_profile = _safe_profile_dict(user.profile_data)
+    target_profile = _safe_profile_dict(target.profile_data)
+
+    target_profile["schedule_blocks"] = list(master_profile.get("schedule_blocks", []))
+    master_profile["schedule_blocks"] = []
+
+    user.profile_data = json.dumps(master_profile)
+    target.profile_data = json.dumps(target_profile)
+    family.creator_username = target.username
+    db.session.commit()
+
+    return jsonify({"message": f"Transferred master role to {target_username}"}), 200
 
 # -------------------- Health --------------------
 @app.route("/")

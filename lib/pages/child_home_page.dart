@@ -38,16 +38,17 @@ class _ChildHomePageState extends State<ChildHomePage> {
 
   Future<void> _loadFromServer() async {
     try {
-      final res = await http.get(Uri.parse('$_base/profile/family'), headers: _jsonHeaders);
+      final res = await http.get(Uri.parse('$_base/profile'), headers: _jsonHeaders);
       if (res.statusCode != 200) {
         _toast('Failed to load profile: ${res.statusCode}');
         return;
       }
       final body = json.decode(res.body) as Map<String, dynamic>;
       final blocks = (body['schedule_blocks'] as List? ?? const []);
+      final tasks = <Task>[];
       for (final b in blocks) {
         final m = (b as Map).cast<String, dynamic>();
-        _ctrl.load(
+        tasks.add(
           Task(
             title: (m['title'] ?? '').toString(),
             startTime: (m['startTime'] ?? '').toString().isEmpty ? null : (m['startTime'] as String),
@@ -56,10 +57,11 @@ class _ChildHomePageState extends State<ChildHomePage> {
             steps: (m['steps'] is List) ? List<String>.from(m['steps'] as List) : const <String>[],
             hidden: (m['hidden'] is bool) ? m['hidden'] as bool : false,
             completed: (m['completed'] is bool) ? m['completed'] as bool : false,
+            familyTag: ((m['family_tag'] ?? '').toString().isEmpty ? null : m['family_tag'].toString()),
           ),
         );
       }
-      setState(() {});
+      _ctrl.replaceAll(tasks);
     } catch (e) {
       _toast('Load error: $e');
     }
@@ -69,7 +71,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
   Future<void> _persistToggle(Task before, Task after) async {
     try {
       final res = await http.post(
-        Uri.parse('$_base/profile/family/block/edit'),
+        Uri.parse('$_base/profile/block/edit'),
         headers: _jsonHeaders,
         body: json.encode({'old_block': _taskToBlock(before), 'new_block': _taskToBlock(after)}),
       );
@@ -87,6 +89,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
         'steps': t.steps,
         'hidden': t.hidden,
         'completed': t.completed,
+        'family_tag': t.familyTag,
       };
 
   Future<void> _handleMenuSelect(String value) async {

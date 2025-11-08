@@ -146,7 +146,7 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   Expanded(
                     child: FilledButton(
-                      onPressed: _canSignIn ? _signIn : null,
+                      onPressed: _canSignIn ? () => _signIn() : null,
                       child: const Text('Sign In'),
                     ),
                   ),
@@ -157,7 +157,7 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _navigateToCreateAccount,
+                      onPressed: () => _navigateToCreateAccount(),
                       child: const Text('Create Account'),
                     ),
                   ),

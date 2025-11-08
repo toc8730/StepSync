@@ -169,7 +169,7 @@ class _CreateFamilyPageState extends State<CreateFamilyPage> {
                   children: [
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _createFamily,
+                        onPressed: () => _createFamily(),
                         icon: const Icon(Icons.check),
                         label: const Text('Create'),
                       ),

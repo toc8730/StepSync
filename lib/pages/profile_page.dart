@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:my_app/data/globals.dart';
 import 'package:my_app/services/preferences_service.dart';
+import 'package:my_app/services/family_service.dart';
 import 'package:my_app/theme_controller.dart';
 
 import 'create_family_page.dart';
@@ -29,6 +30,9 @@ class _ProfilePageState extends State<ProfilePage> {
   ThemePreference _themePreference = ThemePreference.system;
   bool _prefsLoading = true;
   String? _prefsError;
+  bool _membersLoading = false;
+  String? _membersError;
+  FamilyMembers? _familyMembers;
 
   static const _meUrl = 'http://127.0.0.1:5000/me';
 
@@ -41,6 +45,9 @@ class _ProfilePageState extends State<ProfilePage> {
     _loading = true;
     _fetchProfile();
     _loadPreferences();
+    if (_role == 'parent') {
+      _loadFamilyMembers();
+    }
   }
 
   Future<void> _loadPreferences() async {
@@ -64,6 +71,60 @@ class _ProfilePageState extends State<ProfilePage> {
         _prefsError = 'Failed to load preferences: $e';
       });
     }
+  }
+
+  Future<void> _loadFamilyMembers() async {
+    if (_role != 'parent') return;
+    setState(() {
+      _membersLoading = true;
+      _membersError = null;
+    });
+    try {
+      final members = await FamilyService.fetchMembers();
+      if (!mounted) return;
+      if (members == null) {
+        setState(() {
+          _membersLoading = false;
+          _familyMembers = null;
+          _membersError = 'Unable to load family members.';
+        });
+      } else {
+        setState(() {
+          _familyMembers = members;
+          _membersLoading = false;
+          _membersError = null;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _membersLoading = false;
+        _membersError = 'Failed to load family members: $e';
+      });
+    }
+  }
+
+  Future<void> _removeMember(String username) async {
+    final ok = await FamilyService.removeMember(username);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to remove $username.')),
+      );
+      return;
+    }
+    await _loadFamilyMembers();
+  }
+
+  Future<void> _transferMaster(String username) async {
+    final ok = await FamilyService.transferMaster(username);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to transfer master role.')),
+      );
+      return;
+    }
+    await _loadFamilyMembers();
+    await _fetchProfile();
   }
 
   Future<void> _updateTheme(ThemePreference pref) async {
@@ -141,7 +202,14 @@ class _ProfilePageState extends State<ProfilePage> {
       _familyIdentifier = famId;
       _loading = false;
       _error = null;
+      if (!(_role == 'parent' && _familyIdentifier != null)) {
+        _familyMembers = null;
+      }
     });
+
+    if (_role == 'parent' && _familyIdentifier != null) {
+      _loadFamilyMembers();
+    }
   }
 
   @override
@@ -154,6 +222,7 @@ class _ProfilePageState extends State<ProfilePage> {
         onRefresh: () async {
           await _fetchProfile();
           await _loadPreferences();
+          await _loadFamilyMembers();
         },
         child: ListView(
           children: [
@@ -168,6 +237,10 @@ class _ProfilePageState extends State<ProfilePage> {
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             ),
             const Divider(height: 0),
+            if (_familyIdentifier != null && _role == 'parent')
+              _familyManagementCard(),
+            if (_familyIdentifier != null && _role == 'parent')
+              const Divider(height: 0),
             ListTile(
               leading: const Icon(Icons.light_mode_outlined),
               title: const Text('Theme'),
@@ -248,7 +321,7 @@ class _ProfilePageState extends State<ProfilePage> {
           Expanded(child: Text(msg)),
           IconButton(
             tooltip: 'Retry',
-            onPressed: _fetchProfile,
+            onPressed: () => _fetchProfile(),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -268,5 +341,91 @@ class _ProfilePageState extends State<ProfilePage> {
       default:
         return 'System default';
     }
+  }
+
+  Widget _familyManagementCard() {
+    final members = _familyMembers;
+    final isMaster = members?.isMaster ?? false;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          leading: const Icon(Icons.family_restroom_outlined),
+          title: const Text('Family Members'),
+          subtitle: Text(_membersLoading
+              ? 'Loading members...'
+              : members == null
+                  ? 'No data available'
+                  : '${members.parents.length} parent(s), ${members.children.length} child(ren)'),
+          trailing: IconButton(
+            tooltip: 'Refresh members',
+            onPressed: _membersLoading ? null : () => _loadFamilyMembers(),
+            icon: const Icon(Icons.refresh),
+          ),
+        ),
+        if (_membersError != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Text(
+              _membersError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+            ),
+          ),
+        if (!_membersLoading && members != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Parents', style: TextStyle(fontWeight: FontWeight.w600)),
+                ...members.parents.map(
+                  (m) => _memberRow(
+                    m,
+                    canTransfer: isMaster && !m.isMaster,
+                    canRemove: isMaster && !m.isMaster,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('Children', style: TextStyle(fontWeight: FontWeight.w600)),
+                ...members.children.map(
+                  (m) => _memberRow(
+                    m,
+                    canTransfer: false,
+                    canRemove: isMaster,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _memberRow(FamilyMember member, {required bool canTransfer, required bool canRemove}) {
+    final showTransfer = canTransfer && !member.isMaster;
+    final showRemove = canRemove && (!member.isMaster || !canTransfer);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(member.isMaster ? Icons.star : Icons.person_outline),
+      title: Text(member.username),
+      subtitle: member.isMaster ? const Text('Master parent') : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showTransfer)
+            IconButton(
+              tooltip: 'Make master parent',
+              icon: const Icon(Icons.workspace_premium),
+              onPressed: () => _transferMaster(member.username),
+            ),
+          if (showRemove)
+            IconButton(
+              tooltip: 'Remove from family',
+              icon: const Icon(Icons.remove_circle_outline),
+              onPressed: () => _removeMember(member.username),
+            ),
+        ],
+      ),
+    );
   }
 }

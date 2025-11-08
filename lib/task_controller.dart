@@ -1,11 +1,7 @@
 // lib/task_controller.dart
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:my_app/data/globals.dart';
 import 'models/task.dart';
 import 'services/push_notifications.dart';
-import 'package:http/http.dart' as http;
 
 class TaskController extends ChangeNotifier {
   final List<Task> _tasks = [];
@@ -16,13 +12,6 @@ class TaskController extends ChangeNotifier {
   void add(Task t) {
     _tasks.add(t);
     _scheduleFor(t);
-
-    http.post(
-      Uri.parse("http://127.0.0.1:5000/profile/block/add"),
-      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ${AppGlobals.token}'},
-      body: json.encode({'block':{'title':t.title,'startTime':t.startTime,'endTime':t.endTime,'period':t.period,'hidden':t.hidden,'completed':t.completed}})
-    );
-
     notifyListeners();
   }
 
@@ -35,14 +24,6 @@ class TaskController extends ChangeNotifier {
 
   void update(int index, Task t) {
     final old = _tasks[index];
-
-    http.post(
-      Uri.parse("http://127.0.0.1:5000/profile/block/edit"),
-      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ${AppGlobals.token}'},
-      body: json.encode({'old_block':{'title':old.title,'startTime':old.startTime,'endTime':old.endTime,'period':old.period,'hidden':old.hidden,'completed':old.completed},
-                        'new_block':{'title':t.title,'startTime':t.startTime,'endTime':t.endTime,'period':t.period,'hidden':t.hidden,'completed':t.completed}})
-    );
-
     _cancelFor(old);
     _tasks[index] = t;
     _scheduleFor(t);
@@ -63,6 +44,19 @@ class TaskController extends ChangeNotifier {
       _cancelFor(t);
     } else {
       _scheduleFor(t);
+    }
+    notifyListeners();
+  }
+
+  void replaceAll(List<Task> tasks) {
+    for (final task in _tasks) {
+      _cancelFor(task);
+    }
+    _tasks
+      ..clear()
+      ..addAll(tasks);
+    for (final task in _tasks) {
+      _scheduleFor(task);
     }
     notifyListeners();
   }

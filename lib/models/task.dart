@@ -7,6 +7,7 @@ class Task {
     this.period, // "AM" | "PM"
     this.hidden = false,
     this.completed = false,
+    this.familyTag,
   });
 
   String title;
@@ -16,4 +17,5 @@ class Task {
   String? period;    // "AM" or "PM"
   bool hidden;
   bool completed;
+  String? familyTag;
 }

@@ -60,7 +60,7 @@ class _MediaPickerState extends State<MediaPicker> {
         Text(widget.label, style: const TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(width: 12),
         OutlinedButton.icon(
-          onPressed: _pickImages,
+          onPressed: () => _pickImages(),
           icon: const Icon(Icons.add_photo_alternate_outlined),
           label: const Text('Add'),
         ),

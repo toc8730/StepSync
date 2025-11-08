@@ -238,6 +238,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
       steps: steps,
       completed: widget.initial?.completed ?? false,
       hidden: widget.initial?.hidden ?? false,
+      familyTag: widget.initial?.familyTag,
     );
 
     // Store per-step images (in-memory)

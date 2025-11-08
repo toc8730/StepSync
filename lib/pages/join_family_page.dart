@@ -105,7 +105,7 @@ class _JoinFamilyPageState extends State<JoinFamilyPage> {
                   children: [
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _isLoading ? null : _joinFamily,
+                        onPressed: _isLoading ? null : () => _joinFamily(),
                         icon: const Icon(Icons.login),
                         label: Text(_isLoading ? 'Joining...' : 'Join'),
                       ),
