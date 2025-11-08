@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'theme_controller.dart';
 
 // Your firebase_options.dart is inside /lib/pages in this project.
 import 'firebase_options.dart';
@@ -29,14 +30,24 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'My App',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
+    return AnimatedBuilder(
+      animation: ThemeController.instance,
+      builder: (_, __) => MaterialApp(
+        title: 'My App',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+          useMaterial3: true,
+          brightness: Brightness.light,
+        ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: Brightness.dark),
+          useMaterial3: true,
+          brightness: Brightness.dark,
+        ),
+        themeMode: ThemeController.instance.mode,
+        home: const LoginPage(),
       ),
-      home: const LoginPage(),
     );
   }
 }

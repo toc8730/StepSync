@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:my_app/data/globals.dart';
+import 'package:my_app/services/preferences_service.dart';
+import 'package:my_app/theme_controller.dart';
 import 'homepage.dart';
 import 'create_account_page.dart';
 import 'child_home_page.dart';
@@ -77,6 +79,9 @@ class _LoginPageState extends State<LoginPage> {
         final role = (data['role'] ?? '').toString().toLowerCase();
 
         AppGlobals.token = token;
+
+        final pref = await PreferencesService.fetchTheme();
+        ThemeController.instance.applyPreference(parseThemePreference(pref));
 
         final String username = _usernameController.text.trim();
         if (!mounted) return;

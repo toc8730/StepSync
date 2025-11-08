@@ -55,18 +55,28 @@ with app.app_context():
     db.create_all()
 
 # -------------------- Helpers --------------------
+def _default_preferences() -> dict:
+    return {"theme": "system"}
+
 def _safe_profile_dict(text_json: str | None) -> dict:
     if not text_json:
-        return {"schedule_blocks": []}
+        return {"schedule_blocks": [], "preferences": _default_preferences()}
     try:
         data = json.loads(text_json)
         if not isinstance(data, dict):
-            return {"schedule_blocks": []}
+            return {"schedule_blocks": [], "preferences": _default_preferences()}
         if "schedule_blocks" not in data or not isinstance(data.get("schedule_blocks"), list):
             data["schedule_blocks"] = []
+        if "preferences" not in data or not isinstance(data.get("preferences"), dict):
+            data["preferences"] = _default_preferences()
+        else:
+            prefs = data["preferences"]
+            theme = (prefs.get("theme") or "").lower()
+            if theme not in ("light", "dark", "system"):
+                prefs["theme"] = "system"
         return data
     except Exception:
-        return {"schedule_blocks": []}
+        return {"schedule_blocks": [], "preferences": _default_preferences()}
 
 def _rand_family_id(n: int = 10) -> str:
     alphabet = string.ascii_letters + string.digits
@@ -410,7 +420,7 @@ def register():
         return jsonify({"error": "Username already exists"}), 400
 
     hashed_pw = generate_password_hash(password)
-    default_profile_data = json.dumps({"schedule_blocks": []})
+    default_profile_data = json.dumps({"schedule_blocks": [], "preferences": _default_preferences()})
     new_user = User(
         username=username,
         password=hashed_pw,
@@ -606,6 +616,31 @@ def block_delete():
         return jsonify({"error": "Block not found"}), 404
 
     return jsonify({"error": "Provide 'index' or 'block'"}), 400
+
+@app.route("/profile/preferences", methods=["GET", "POST"])
+@jwt_required()
+def profile_preferences():
+    current_user = get_jwt_identity()
+    user = User.query.filter_by(username=current_user).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    prof = _safe_profile_dict(user.profile_data)
+    prefs = prof.get("preferences", _default_preferences())
+
+    if request.method == "GET":
+        return jsonify({"preferences": prefs}), 200
+
+    payload = request.get_json(silent=True) or {}
+    theme = (payload.get("theme") or "").strip().lower()
+    if theme not in ("light", "dark", "system"):
+        return jsonify({"error": "Theme must be 'light', 'dark', or 'system'."}), 400
+
+    prefs["theme"] = theme
+    prof["preferences"] = prefs
+    user.profile_data = json.dumps(prof)
+    db.session.commit()
+    return jsonify({"preferences": prefs}), 200
 
 # -------------------- AI Task Generation --------------------
 @app.route("/ai/tasks", methods=["POST"])
