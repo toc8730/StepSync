@@ -53,6 +53,10 @@ class _ProfilePageState extends State<ProfilePage> {
   String? _accountSuccess;
   String? _googleError;
   String? _googleSuccess;
+  bool _leaveLoading = false;
+  bool _leaveRequestsLoading = false;
+  String? _leaveRequestsError;
+  List<LeaveRequestInfo> _leaveRequests = const [];
   late final GoogleSignIn _googleSignIn;
 
   static const _meUrl = 'http://127.0.0.1:5000/me';
@@ -61,7 +65,7 @@ class _ProfilePageState extends State<ProfilePage> {
   void initState() {
     super.initState();
     _googleSignIn = GoogleSignIn(
-      scopes: const ['email'],
+      scopes: const ['email', 'profile', 'openid'],
       clientId: GoogleOAuthConfig.platformClientId,
       serverClientId: GoogleOAuthConfig.serverClientId,
     );
@@ -110,7 +114,17 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadFamilyMembers() async {
-    if (_role != 'parent') return;
+    if (_role != 'parent' || _familyIdentifier == null) {
+      if (mounted) {
+        setState(() {
+          _familyMembers = null;
+          _leaveRequests = const [];
+          _leaveRequestsError = null;
+          _leaveRequestsLoading = false;
+        });
+      }
+      return;
+    }
     setState(() {
       _membersLoading = true;
       _membersError = null;
@@ -123,6 +137,9 @@ class _ProfilePageState extends State<ProfilePage> {
           _membersLoading = false;
           _familyMembers = null;
           _membersError = 'Unable to load family members.';
+          _leaveRequests = const [];
+          _leaveRequestsError = null;
+          _leaveRequestsLoading = false;
         });
       } else {
         setState(() {
@@ -130,6 +147,16 @@ class _ProfilePageState extends State<ProfilePage> {
           _membersLoading = false;
           _membersError = null;
         });
+        if (members.isMaster) {
+          await _loadLeaveRequests();
+        } else {
+          if (!mounted) return;
+          setState(() {
+            _leaveRequests = const [];
+            _leaveRequestsError = null;
+            _leaveRequestsLoading = false;
+          });
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -161,6 +188,84 @@ class _ProfilePageState extends State<ProfilePage> {
     }
     await _loadFamilyMembers();
     await _fetchProfile();
+  }
+
+  Future<void> _handleLeaveRequestAction(String username, bool approve) async {
+    try {
+      final message = await FamilyService.handleLeaveRequest(username, approve);
+      if (!mounted) return;
+      _showSnack(message);
+      await _loadFamilyMembers();
+      await _loadLeaveRequests();
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack(_friendlyError(e));
+    }
+  }
+
+  Future<void> _confirmLeaveFamily() async {
+    if (_familyIdentifier == null || _leaveLoading) return;
+    final isParent = _role == 'parent';
+    final title = isParent ? 'Leave family' : 'Request to leave family';
+    final message = isParent
+        ? 'Are you sure you want to leave this family? This cannot be undone.'
+        : 'Do you want to request permission from the master parent to leave this family?';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: Text(isParent ? 'Leave' : 'Request')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _leaveLoading = true);
+    try {
+      final message = await FamilyService.leaveFamily();
+      if (!mounted) return;
+      _showSnack(message);
+      await _fetchProfile();
+      await _loadFamilyMembers();
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack(_friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _leaveLoading = false);
+    }
+  }
+
+  Future<void> _loadLeaveRequests() async {
+    if (!mounted) return;
+    if (!(_familyMembers?.isMaster ?? false)) {
+      setState(() {
+        _leaveRequests = const [];
+        _leaveRequestsError = null;
+        _leaveRequestsLoading = false;
+      });
+      return;
+    }
+    setState(() {
+      _leaveRequestsLoading = true;
+      _leaveRequestsError = null;
+    });
+    try {
+      final requests = await FamilyService.fetchLeaveRequests();
+      if (!mounted) return;
+      setState(() {
+        _leaveRequests = requests;
+        _leaveRequestsLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _leaveRequestsError = 'Failed to load leave requests: $e';
+        _leaveRequestsLoading = false;
+      });
+    }
   }
 
   Future<void> _updateTheme(ThemePreference pref) async {
@@ -433,6 +538,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     final isParent = _role == 'parent';
+    final inFamily = _familyIdentifier != null;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
@@ -487,6 +593,8 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
             const Divider(height: 0),
+            if (inFamily) _leaveFamilyTile(),
+            if (inFamily) const Divider(height: 0),
             _accountSettingsCard(),
             const Divider(height: 0),
             if (_authProvider == 'google') ...[
@@ -498,20 +606,32 @@ class _ProfilePageState extends State<ProfilePage> {
               ListTile(
                 leading: const Icon(Icons.family_restroom_outlined),
                 title: const Text('Create Family'),
-                subtitle: const Text('Start a new family group'),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const CreateFamilyPage()),
+                subtitle: Text(
+                  inFamily
+                      ? 'Leave your current family before creating a new one.'
+                      : 'Start a new family group',
                 ),
+                onTap: inFamily
+                    ? () => _showSnack('Leave your current family before creating a new one.')
+                    : () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const CreateFamilyPage()),
+                        ),
               ),
               const Divider(height: 0),
             ],
             ListTile(
               leading: const Icon(Icons.group_add_outlined),
               title: const Text('Join Family'),
-              subtitle: const Text('Enter a family identifier to join'),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const JoinFamilyPage()),
+              subtitle: Text(
+                inFamily
+                    ? 'Leave your current family before joining another.'
+                    : 'Enter a family identifier to join',
               ),
+              onTap: inFamily
+                  ? () => _showSnack('Leave your current family before joining another.')
+                  : () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const JoinFamilyPage()),
+                      ),
             ),
           ],
         ),
@@ -658,6 +778,27 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Widget _leaveFamilyTile() {
+    final isParent = _role == 'parent';
+    final title = isParent ? 'Leave Family' : 'Request to Leave Family';
+    final subtitle = isParent
+        ? 'Leave immediately and transfer responsibilities automatically.'
+        : 'Send a request to the master parent to leave.';
+    return ListTile(
+      leading: Icon(isParent ? Icons.logout : Icons.outbox),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: _leaveLoading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : null,
+      onTap: _leaveLoading ? null : _confirmLeaveFamily,
+    );
+  }
+
   Widget _googleAccountCard() {
     final configIssue = GoogleOAuthConfig.configurationHint();
     final disabled = configIssue != null || _switchingGoogle;
@@ -737,7 +878,7 @@ class _ProfilePageState extends State<ProfilePage> {
               ? 'Loading members...'
               : members == null
                   ? 'No data available'
-                  : '${members.parents.length} parent(s), ${members.children.length} child(ren)'),
+                  : _familyMembersSubtitle(members)),
           trailing: IconButton(
             tooltip: 'Refresh members',
             onPressed: _membersLoading ? null : () => _loadFamilyMembers(),
@@ -778,8 +919,80 @@ class _ProfilePageState extends State<ProfilePage> {
               ],
             ),
           ),
+        if ((_familyMembers?.isMaster ?? false)) _leaveRequestsPanel(),
       ],
     );
+  }
+
+  String _familyMembersSubtitle(FamilyMembers members) {
+    final base = '${members.parents.length} parent(s), ${members.children.length} child(ren)';
+    if (members.isMaster && members.pendingRequests > 0) {
+      return '$base\nPending leave requests: ${members.pendingRequests}';
+    }
+    return base;
+  }
+
+  Widget _leaveRequestsPanel() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Leave Requests', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          if (_leaveRequestsLoading)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: LinearProgressIndicator(),
+            ),
+          if (_leaveRequestsError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _leaveRequestsError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              ),
+            ),
+          if (!_leaveRequestsLoading && _leaveRequestsError == null && _leaveRequests.isEmpty)
+            const Text('No pending requests.'),
+          ..._leaveRequests.map(
+            (req) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.child_care_outlined),
+              title: Text(req.childUsername),
+              subtitle: Text(_formatRequestTime(req.requestedAt)),
+              trailing: Wrap(
+                spacing: 4,
+                children: [
+                  IconButton(
+                    tooltip: 'Approve',
+                    icon: const Icon(Icons.check_circle, color: Colors.green),
+                    onPressed: _leaveRequestsLoading ? null : () => _handleLeaveRequestAction(req.childUsername, true),
+                  ),
+                  IconButton(
+                    tooltip: 'Reject',
+                    icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                    onPressed: _leaveRequestsLoading ? null : () => _handleLeaveRequestAction(req.childUsername, false),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatRequestTime(DateTime? timestamp) {
+    if (timestamp == null) return 'Requested just now';
+    final local = timestamp.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    final year = local.year;
+    final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = local.hour >= 12 ? 'PM' : 'AM';
+    return 'Requested $month/$day/$year at $hour12:$minute $period';
   }
 
   Widget _memberRow(FamilyMember member, {required bool canTransfer, required bool canRemove}) {

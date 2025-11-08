@@ -6,7 +6,7 @@ from flask_jwt_extended import (
 )
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import timedelta
+from datetime import datetime, timedelta
 from sqlalchemy import inspect, text
 import re
 import json
@@ -60,6 +60,7 @@ class User(db.Model):
     account_type = db.Column(db.Text, nullable=False)         # "parent" | "child"
     profile_data = db.Column(db.Text)                         # JSON string
     family_id    = db.Column(db.String(20), nullable=True)
+    family_joined_at = db.Column(db.DateTime, nullable=True)
 
 class Family(db.Model):
     __tablename__ = "families"
@@ -68,6 +69,14 @@ class Family(db.Model):
     name             = db.Column(db.String(100), nullable=False)
     password         = db.Column(db.String(200), nullable=False)
     creator_username = db.Column(db.String(100), nullable=False)
+
+class FamilyLeaveRequest(db.Model):
+    __tablename__ = "family_leave_requests"
+    id             = db.Column(db.Integer, primary_key=True)
+    family_id      = db.Column(db.String(20), db.ForeignKey("families.family_id"), nullable=False)
+    child_username = db.Column(db.String(100), nullable=False)
+    status         = db.Column(db.String(20), nullable=False, default="pending")  # pending | resolved
+    created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 with app.app_context():
     db.create_all()
@@ -81,6 +90,11 @@ with app.app_context():
             conn.execute(text("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'password'"))
         with db.engine.begin() as conn:
             conn.execute(text("UPDATE users SET auth_provider = 'password' WHERE auth_provider IS NULL OR TRIM(auth_provider) = ''"))
+    if "family_joined_at" not in user_columns:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN family_joined_at TIMESTAMP"))
+        with db.engine.begin() as conn:
+            conn.execute(text("UPDATE users SET family_joined_at = CURRENT_TIMESTAMP WHERE family_id IS NOT NULL AND family_joined_at IS NULL"))
 
 # -------------------- Helpers --------------------
 def _default_preferences() -> dict:
@@ -136,6 +150,52 @@ def _schedule_owner(user: 'User') -> tuple['User', bool]:
 def _family_children(family: 'Family') -> list['User']:
     members = User.query.filter_by(family_id=family.family_id).all()
     return [m for m in members if m.account_type.lower() == "child"]
+
+def _family_parents(family: 'Family') -> list['User']:
+    members = User.query.filter_by(family_id=family.family_id).all()
+    return [m for m in members if m.account_type.lower() == "parent"]
+
+def _clear_child_tasks(child: 'User') -> None:
+    profile = _safe_profile_dict(child.profile_data)
+    if profile.get("schedule_blocks"):
+        profile["schedule_blocks"] = []
+        child.profile_data = json.dumps(profile)
+
+def _detach_user_from_family(user: 'User') -> None:
+    user.family_id = None
+    user.family_joined_at = None
+
+def _pick_longest_tenured_parent(family: 'Family', *, exclude: str | None = None) -> 'User | None':
+    parents = _family_parents(family)
+    candidates = [p for p in parents if p.username != exclude]
+    if not candidates:
+        return None
+    now = datetime.utcnow()
+    candidates.sort(key=lambda u: ((u.family_joined_at or now), u.id))
+    return candidates[0]
+
+def _delete_family_and_cleanup(family: 'Family') -> None:
+    members = User.query.filter_by(family_id=family.family_id).all()
+    for member in members:
+        if member.account_type.lower() == "child":
+            _clear_child_tasks(member)
+        _detach_user_from_family(member)
+    FamilyLeaveRequest.query.filter_by(family_id=family.family_id).delete()
+    db.session.delete(family)
+
+def _handle_parent_leave(user: 'User', family: 'Family') -> str:
+    was_master = family.creator_username == user.username
+    _detach_user_from_family(user)
+    message = "Left family."
+    if was_master:
+        replacement = _pick_longest_tenured_parent(family, exclude=user.username)
+        if replacement:
+            family.creator_username = replacement.username
+            message = f"Transferred master role to {replacement.username}."
+        else:
+            _delete_family_and_cleanup(family)
+            message = "Family deleted because no parents remained."
+    return message
 
 def _append_block_to_user(user: 'User', block: dict) -> None:
     prof = _safe_profile_dict(user.profile_data)
@@ -1152,6 +1212,7 @@ def create_family():
     user = User.query.filter_by(username=creator).first()
     if user:
         user.family_id = family_id
+        user.family_joined_at = datetime.utcnow()
 
     db.session.commit()
     return jsonify({"message": "Family created", "family_id": fam.family_id}), 200
@@ -1170,8 +1231,11 @@ def join_family():
     user = User.query.filter_by(username=get_jwt_identity()).first()
     if not user:
         return jsonify({"error": "User not found"}), 404
+    if user.family_id:
+        return jsonify({"error": "Leave your current family before joining another one."}), 400
 
     user.family_id = family_id
+    user.family_joined_at = datetime.utcnow()
     db.session.commit()
     return jsonify({"message": "Joined family successfully"}), 200
 
@@ -1199,10 +1263,12 @@ def family_members():
         else:
             children.append({"username": member.username})
 
+    pending = FamilyLeaveRequest.query.filter_by(family_id=family.family_id, status="pending").count()
     is_master = user.account_type.lower() == "parent" and user.username == family.creator_username
     return jsonify({
         "family_id": family.family_id,
         "is_master": is_master,
+        "pending_leave_requests": pending if is_master else 0,
         "parents": parents,
         "children": children,
     }), 200
@@ -1231,9 +1297,106 @@ def family_member_remove():
     if not target or target.family_id != family.family_id:
         return jsonify({"error": "User is not part of this family"}), 404
 
-    target.family_id = None
+    if target.account_type.lower() == "child":
+        _clear_child_tasks(target)
+    _detach_user_from_family(target)
+    FamilyLeaveRequest.query.filter_by(family_id=family.family_id, child_username=target.username).delete()
     db.session.commit()
     return jsonify({"message": f"Removed {target_username} from family"}), 200
+
+@app.route("/family/leave", methods=["POST"])
+@jwt_required()
+def family_leave():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "You are not currently in a family."}), 400
+
+    if user.account_type.lower() == "child":
+        existing = FamilyLeaveRequest.query.filter_by(
+            family_id=family.family_id,
+            child_username=user.username,
+            status="pending",
+        ).first()
+        if existing:
+            return jsonify({"message": "A leave request is already pending approval."}), 200
+        req = FamilyLeaveRequest(family_id=family.family_id, child_username=user.username)
+        db.session.add(req)
+        db.session.commit()
+        return jsonify({"message": "Leave request sent to the master parent."}), 200
+
+    message = _handle_parent_leave(user, family)
+    db.session.commit()
+    return jsonify({"message": message}), 200
+
+@app.route("/family/leave/requests", methods=["GET"])
+@jwt_required()
+def family_leave_requests():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "User is not part of a family"}), 400
+    if user.account_type.lower() != "parent" or user.username != family.creator_username:
+        return jsonify({"error": "Only the master parent can view leave requests"}), 403
+
+    pending = FamilyLeaveRequest.query.filter_by(
+        family_id=family.family_id,
+        status="pending",
+    ).order_by(FamilyLeaveRequest.created_at.asc()).all()
+    results = [
+        {
+            "child_username": item.child_username,
+            "requested_at": item.created_at.isoformat() if item.created_at else None,
+        }
+        for item in pending
+    ]
+    return jsonify({"requests": results}), 200
+
+@app.route("/family/leave/requests/handle", methods=["POST"])
+@jwt_required()
+def family_leave_requests_handle():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "User is not part of a family"}), 400
+    if user.account_type.lower() != "parent" or user.username != family.creator_username:
+        return jsonify({"error": "Only the master parent can manage leave requests"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    child_username = (payload.get("child_username") or "").strip()
+    action = (payload.get("action") or "").strip().lower()
+    if not child_username or action not in ("approve", "accept", "deny", "reject"):
+        return jsonify({"error": "Provide child_username and action ('approve' or 'reject')."}), 400
+
+    request_row = FamilyLeaveRequest.query.filter_by(
+        family_id=family.family_id,
+        child_username=child_username,
+        status="pending",
+    ).first()
+    if not request_row:
+        return jsonify({"error": "No pending request found for that child."}), 404
+
+    approved = action in ("approve", "accept")
+    success = False
+    child = User.query.filter_by(username=child_username).first()
+    if approved:
+        if child and child.family_id == family.family_id:
+            _clear_child_tasks(child)
+            _detach_user_from_family(child)
+            success = True
+        else:
+            success = True  # child already left; treat as handled
+    FamilyLeaveRequest.query.filter_by(id=request_row.id).delete()
+    db.session.commit()
+    if success and approved:
+        return jsonify({"message": f"{child_username} has left the family."}), 200
+    return jsonify({"message": "Leave request rejected."}), 200
 
 @app.route("/family/master/transfer", methods=["POST"])
 @jwt_required()
