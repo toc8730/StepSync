@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
+import 'package:my_app/utils/task_step_resolver.dart';
 import '../task_controller.dart';
 import '../models/task.dart';
 import '../services/family_service.dart';
@@ -609,7 +610,7 @@ class _ParentTasksSectionWithSync extends StatelessWidget {
               MaterialPageRoute(
                 builder: (_) => TaskDetailPage(
                   task: t,
-                  stepsWithImages: const [], // images handled elsewhere
+                  stepsWithImages: resolveTaskSteps(t),
                 ),
               ),
             );

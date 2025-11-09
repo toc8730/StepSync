@@ -4,6 +4,7 @@ import '../models/task.dart';
 import '../models/task_step.dart';
 import '../widgets/media_picker.dart';
 import '../widgets/step_viewer_dialog.dart'; // ← pop-out viewer
+import '../utils/task_step_resolver.dart';
 
 class TaskTile extends StatefulWidget {
   const TaskTile({
@@ -42,6 +43,7 @@ class _TaskTileState extends State<TaskTile> {
   @override
   Widget build(BuildContext context) {
     final t = widget.task;
+    final resolvedSteps = resolveTaskSteps(t, provided: widget.stepsWithImages);
     final applyStrike = widget.strikeThroughWhenCompleted && t.completed;
     final hasSteps = t.steps.any((s) => s.trim().isNotEmpty);
 
@@ -90,7 +92,7 @@ class _TaskTileState extends State<TaskTile> {
               StepViewerDialog.show(
                 context,
                 task: widget.task,
-                stepsWithImages: widget.stepsWithImages,
+                stepsWithImages: resolvedSteps,
                 initialIndex: 0,
               );
             },
@@ -142,8 +144,8 @@ class _TaskTileState extends State<TaskTile> {
                     final i = entry.key;
                     final s = entry.value.trim();
 
-                    final imgs = (i < widget.stepsWithImages.length)
-                        ? widget.stepsWithImages[i].images
+                    final imgs = (i < resolvedSteps.length)
+                        ? resolvedSteps[i].images
                         : const <PickedImage>[];
 
                     return Padding(
