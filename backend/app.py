@@ -1050,19 +1050,16 @@ def account_switch_google():
         return jsonify({"error": "Google sign-in is not linked to this account."}), 400
 
     payload = request.get_json(silent=True) or {}
-    current_password = (payload.get("current_password") or payload.get("password") or "").strip()
-    if not current_password:
-        return jsonify({"error": "Current password is required."}), 400
-    if not _require_password(user, current_password):
-        return jsonify({"error": "Incorrect password."}), 403
-
     id_token = (payload.get("id_token") or "").strip()
-    if not id_token:
-        return jsonify({"error": "Google id_token is required."}), 400
+    access_token = (payload.get("access_token") or "").strip()
+    if not id_token and not access_token:
+        return jsonify({"error": "Google credential is required."}), 400
 
-    info = _verify_google_id_token(id_token)
+    info = _verify_google_id_token(id_token) if id_token else None
+    if not info and access_token:
+        info = _verify_google_access_token(access_token)
     if not info:
-        return jsonify({"error": "Invalid Google token."}), 400
+        return jsonify({"error": "Invalid Google credential."}), 400
 
     email = (info.get("email") or "").strip().lower()
     if not email:

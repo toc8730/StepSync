@@ -47,9 +47,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _membersLoading = false;
   String? _membersError;
   FamilyMembers? _familyMembers;
-  final TextEditingController _googlePasswordController = TextEditingController();
   final TextEditingController _inviteChildController = TextEditingController();
-  bool _showGooglePassword = false;
   bool _updatingCredentials = false;
   bool _switchingGoogle = false;
   bool _sendingInvite = false;
@@ -90,7 +88,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
-    _googlePasswordController.dispose();
     _inviteChildController.dispose();
     super.dispose();
   }
@@ -827,15 +824,6 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
 
-    final password = _googlePasswordController.text.trim();
-    if (password.isEmpty) {
-      setState(() {
-        _googleError = 'Enter your password to continue.';
-        _googleSuccess = null;
-      });
-      return;
-    }
-
     setState(() {
       _googleError = null;
       _googleSuccess = null;
@@ -843,21 +831,25 @@ class _ProfilePageState extends State<ProfilePage> {
     });
 
     try {
-      final account = await _triggerGoogleSelection();
+      final account = await _triggerGoogleSelection(forcePrompt: true);
       if (account == null) {
         setState(() => _googleError = 'Google sign-in was cancelled.');
         return;
       }
-      final auth = await account.authentication;
-      final idToken = auth.idToken;
-      if (idToken == null) {
-        setState(() => _googleError = 'Google did not return an ID token.');
+      final tokens = await _obtainGoogleTokens(account);
+      if (!tokens.hasCredential) {
+        setState(() => _googleError = 'Google did not return a usable credential.');
+        return;
+      }
+      final normalizedCurrent = (_email ?? '').toLowerCase();
+      if (normalizedCurrent.isNotEmpty && account.email.toLowerCase() == normalizedCurrent) {
+        setState(() => _googleError = 'That Google account is already linked.');
         return;
       }
 
       final response = await AccountService.switchGoogleAccount(
-        currentPassword: password,
-        idToken: idToken,
+        idToken: tokens.idToken,
+        accessToken: tokens.accessToken,
       );
       if (!mounted) return;
       if (response.token != null) {
@@ -870,7 +862,6 @@ class _ProfilePageState extends State<ProfilePage> {
         _googleSuccess = 'Google account updated.';
         _googleError = null;
       });
-      _googlePasswordController.clear();
       _showSnack('Google account updated.');
     } catch (e) {
       if (!mounted) return;
@@ -885,16 +876,50 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<GoogleSignInAccount?> _triggerGoogleSelection() async {
-    if (!kIsWeb) {
-      await _googleSignIn.signOut();
-      return _googleSignIn.signIn();
+  Future<_GoogleAuthTokens> _obtainGoogleTokens(GoogleSignInAccount account) async {
+    Future<_GoogleAuthTokens> tokensFor(GoogleSignInAccount acc) async {
+      final auth = await acc.authentication;
+      final id = (auth.idToken?.isNotEmpty ?? false) ? auth.idToken : null;
+      final access = (auth.accessToken?.isNotEmpty ?? false) ? auth.accessToken : null;
+      return _GoogleAuthTokens(idToken: id, accessToken: access);
     }
-    final silent = await _googleSignIn.signInSilently();
-    if (silent != null) return silent;
-    final legacy = await _googleSignIn.signIn();
-    if (legacy == null) return null;
-    return _googleSignIn.signInSilently();
+
+    final direct = await tokensFor(account);
+    if (direct.hasCredential) return direct;
+
+    final refreshed = await _googleSignIn.signInSilently();
+    if (refreshed != null) {
+      final retry = await tokensFor(refreshed);
+      if (retry.hasCredential) return retry;
+    }
+
+    await _googleSignIn.signOut();
+    final reauth = await _googleSignIn.signInSilently();
+    if (reauth != null) {
+      final fallback = await tokensFor(reauth);
+      if (fallback.hasCredential) return fallback;
+    }
+    return const _GoogleAuthTokens();
+  }
+
+  Future<GoogleSignInAccount?> _triggerGoogleSelection({bool forcePrompt = false}) async {
+    if (kIsWeb) {
+      if (!forcePrompt) {
+        final silent = await _googleSignIn.signInSilently();
+        if (silent != null) return silent;
+      } else {
+        await _googleSignIn.signOut();
+      }
+      final legacy = await _googleSignIn.signIn();
+      if (legacy == null) return null;
+      final refreshed = await _googleSignIn.signInSilently();
+      return refreshed ?? legacy;
+    }
+
+    if (forcePrompt) {
+      await _googleSignIn.signOut();
+    }
+    return _googleSignIn.signIn();
   }
 
   void _showSnack(String message) {
@@ -1017,44 +1042,6 @@ class _ProfilePageState extends State<ProfilePage> {
                     isThreeLine: true,
                   ),
                 ),
-                if (_familyIdentifier != null && _role == 'parent') ...[
-                  _familyManagementCard(),
-                  if (_familyMembers?.isMaster ?? false) _familySettingsCard(),
-                ],
-                Card(
-                  margin: const EdgeInsets.symmetric(vertical: 12),
-                  child: ListTile(
-                    leading: const Icon(Icons.light_mode_outlined),
-                    title: const Text('Theme'),
-                    subtitle: Text(_prefsLoading ? 'Loading...' : _themeSubtitle()),
-                    trailing: DropdownButton<ThemePreference>(
-                      value: _themePreference,
-                      onChanged: _prefsLoading ? null : (value) {
-                        if (value != null) _updateTheme(value);
-                      },
-                      items: ThemePreference.values
-                          .map(
-                            (pref) => DropdownMenuItem(
-                              value: pref,
-                              child: Text(_preferenceLabel(pref)),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                ),
-                if (_prefsError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      _prefsError!,
-                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-                    ),
-                  ),
-                if (_role == 'child') _childInvitesCard(),
-                if (inFamily) _leaveFamilyTile(),
-                _accountSettingsCard(),
-                if (_authProvider == 'google') _googleAccountCard(),
                 if (isParent)
                   Card(
                     margin: const EdgeInsets.symmetric(vertical: 12),
@@ -1102,6 +1089,44 @@ class _ProfilePageState extends State<ProfilePage> {
                             }),
                   ),
                 ),
+                if (_familyIdentifier != null && _role == 'parent') ...[
+                  _familyManagementCard(),
+                  if (_familyMembers?.isMaster ?? false) _familySettingsCard(),
+                ],
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  child: ListTile(
+                    leading: const Icon(Icons.light_mode_outlined),
+                    title: const Text('Theme'),
+                    subtitle: Text(_prefsLoading ? 'Loading...' : _themeSubtitle()),
+                    trailing: DropdownButton<ThemePreference>(
+                      value: _themePreference,
+                      onChanged: _prefsLoading ? null : (value) {
+                        if (value != null) _updateTheme(value);
+                      },
+                      items: ThemePreference.values
+                          .map(
+                            (pref) => DropdownMenuItem(
+                              value: pref,
+                              child: Text(_preferenceLabel(pref)),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ),
+                if (_prefsError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      _prefsError!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                    ),
+                  ),
+                if (_role == 'child') _childInvitesCard(),
+                if (inFamily) _leaveFamilyTile(),
+                _accountSettingsCard(),
+                if (_authProvider == 'google') _googleAccountCard(),
               ],
             ),
           );
@@ -1230,18 +1255,9 @@ class _ProfilePageState extends State<ProfilePage> {
             const SizedBox(height: 8),
             Text('Currently linked: ${_email ?? 'Unknown'}'),
             const SizedBox(height: 12),
-            TextField(
-              controller: _googlePasswordController,
-              obscureText: !_showGooglePassword,
-              decoration: InputDecoration(
-                labelText: 'Password *',
-                helperText: 'Confirm with your password before switching Google accounts.',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  onPressed: () => setState(() => _showGooglePassword = !_showGooglePassword),
-                  icon: Icon(_showGooglePassword ? Icons.visibility : Icons.visibility_off),
-                ),
-              ),
+            Text(
+              'Pick a different Google account to relink this profile.',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
@@ -1625,4 +1641,13 @@ class _ProfilePageState extends State<ProfilePage> {
     final side = (maxWidth - maxContentWidth) / 2;
     return math.max(16, side);
   }
+}
+
+class _GoogleAuthTokens {
+  const _GoogleAuthTokens({this.idToken, this.accessToken});
+
+  final String? idToken;
+  final String? accessToken;
+
+  bool get hasCredential => (idToken?.isNotEmpty ?? false) || (accessToken?.isNotEmpty ?? false);
 }

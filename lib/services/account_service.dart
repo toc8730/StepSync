@@ -57,13 +57,13 @@ class AccountService {
     return _mapResponse(response, context: 'update credentials');
   }
 
-  static Future<AccountUpdateResponse> switchGoogleAccount({
-    required String currentPassword,
-    required String idToken,
-  }) async {
+  static Future<AccountUpdateResponse> switchGoogleAccount({String? idToken, String? accessToken}) async {
+    if ((idToken == null || idToken.isEmpty) && (accessToken == null || accessToken.isEmpty)) {
+      throw ArgumentError('Provide an idToken or accessToken to switch Google accounts.');
+    }
     final payload = <String, String>{
-      'current_password': currentPassword,
-      'id_token': idToken,
+      if (idToken != null && idToken.isNotEmpty) 'id_token': idToken,
+      if (accessToken != null && accessToken.isNotEmpty) 'access_token': accessToken,
     };
 
     final response = await http.post(
