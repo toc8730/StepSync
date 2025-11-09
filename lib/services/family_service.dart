@@ -110,6 +110,53 @@ class FamilyService {
     } catch (_) {}
     return {};
   }
+
+  static Future<bool> sendInvite(String childUsername) async {
+    final res = await http.post(
+      Uri.parse('$_baseUrl/family/invite'),
+      headers: _headers(),
+      body: json.encode({'child_username': childUsername}),
+    );
+    if (res.statusCode == 200) {
+      return true;
+    }
+    final body = _decodeBody(res.body);
+    throw Exception(body['error'] ?? 'Unable to send invite.');
+  }
+
+  static Future<List<FamilyInviteInfo>> fetchChildInvites() async {
+    final res = await http.get(Uri.parse('$_baseUrl/family/invite/my'), headers: _headers());
+    if (res.statusCode != 200) {
+      final body = _decodeBody(res.body);
+      throw Exception(body['error'] ?? 'Unable to load invites.');
+    }
+    final body = _decodeBody(res.body);
+    final list = body['invites'];
+    if (list is List) {
+      return list
+          .where((item) => item is Map)
+          .map((item) => FamilyInviteInfo.fromJson(Map<String, dynamic>.from(item as Map)))
+          .toList();
+    }
+    return const [];
+  }
+
+  static Future<bool> respondToInvite({
+    required String familyId,
+    required bool accept,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$_baseUrl/family/invite/respond'),
+      headers: _headers(),
+      body: json.encode({
+        'family_id': familyId,
+        'action': accept ? 'accept' : 'reject',
+      }),
+    );
+    if (res.statusCode == 200) return true;
+    final body = _decodeBody(res.body);
+    throw Exception(body['error'] ?? 'Unable to update invite.');
+  }
 }
 
 class FamilyMember {
@@ -185,6 +232,27 @@ class LeaveRequestInfo {
     return LeaveRequestInfo(
       childUsername: (json['child_username'] ?? '').toString(),
       displayName: FamilyMembers._cleanName(json['display_name'], fallback: json['child_username']),
+      requestedAt: parsed,
+    );
+  }
+}
+
+class FamilyInviteInfo {
+  FamilyInviteInfo({required this.familyId, required this.familyName, this.requestedAt});
+
+  final String familyId;
+  final String familyName;
+  final DateTime? requestedAt;
+
+  factory FamilyInviteInfo.fromJson(Map<String, dynamic> json) {
+    DateTime? parsed;
+    final raw = json['created_at'];
+    if (raw is String && raw.isNotEmpty) {
+      parsed = DateTime.tryParse(raw);
+    }
+    return FamilyInviteInfo(
+      familyId: (json['family_id'] ?? '').toString(),
+      familyName: (json['family_name'] ?? '').toString(),
       requestedAt: parsed,
     );
   }

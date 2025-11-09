@@ -50,6 +50,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController _familyNewPasswordController = TextEditingController();
   final TextEditingController _familyConfirmPasswordController = TextEditingController();
   final TextEditingController _familyCurrentPasswordController = TextEditingController();
+  final TextEditingController _inviteChildController = TextEditingController();
   bool _showNewPassword = false;
   bool _showCurrentPassword = false;
   bool _showGooglePassword = false;
@@ -58,16 +59,23 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _updatingCredentials = false;
   bool _switchingGoogle = false;
   bool _updatingFamily = false;
+  bool _sendingInvite = false;
   String? _accountError;
   String? _accountSuccess;
   String? _googleError;
   String? _googleSuccess;
   String? _familyUpdateError;
   String? _familyUpdateSuccess;
+  String? _inviteError;
+  String? _inviteSuccess;
   bool _leaveLoading = false;
   bool _leaveRequestsLoading = false;
   String? _leaveRequestsError;
   List<LeaveRequestInfo> _leaveRequests = const [];
+  bool _respondingInvite = false;
+  bool _childInvitesLoading = false;
+  String? _childInvitesError;
+  List<FamilyInviteInfo> _childInvites = const [];
   late final GoogleSignIn _googleSignIn;
 
   static const _meUrl = '${BackendConfig.baseUrl}/me';
@@ -102,6 +110,7 @@ class _ProfilePageState extends State<ProfilePage> {
     _familyNewPasswordController.dispose();
     _familyConfirmPasswordController.dispose();
     _familyCurrentPasswordController.dispose();
+    _inviteChildController.dispose();
     super.dispose();
   }
 
@@ -299,6 +308,59 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _respondToInvite(FamilyInviteInfo invite, bool accept) async {
+    setState(() => _respondingInvite = true);
+    try {
+      await FamilyService.respondToInvite(familyId: invite.familyId, accept: accept);
+      await _loadChildInvites();
+      if (accept) {
+        await _fetchProfile();
+        await _loadFamilyMembers();
+        _showSnack('Joined ${invite.familyName}.');
+      } else {
+        _showSnack('Invite declined.');
+      }
+    } catch (e) {
+      _showSnack(_friendlyError(e));
+      await _loadChildInvites();
+    } finally {
+      if (mounted) setState(() => _respondingInvite = false);
+    }
+  }
+
+  Future<void> _sendChildInvite() async {
+    final username = _inviteChildController.text.trim();
+    if (username.isEmpty) {
+      setState(() {
+        _inviteError = 'Enter a child username to invite.';
+        _inviteSuccess = null;
+      });
+      return;
+    }
+    setState(() {
+      _sendingInvite = true;
+      _inviteError = null;
+      _inviteSuccess = null;
+    });
+    try {
+      await FamilyService.sendInvite(username);
+      if (!mounted) return;
+      setState(() {
+        _inviteSuccess = 'Invitation sent to $username.';
+        _inviteError = null;
+      });
+      _inviteChildController.clear();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _inviteError = _friendlyError(e);
+        _inviteSuccess = null;
+      });
+    } finally {
+      if (mounted) setState(() => _sendingInvite = false);
+    }
+  }
+
   Future<void> _confirmLeaveFamily() async {
     if (_familyIdentifier == null || _leaveLoading) return;
     final isParent = _role == 'parent';
@@ -360,6 +422,37 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         _leaveRequestsError = 'Failed to load leave requests: $e';
         _leaveRequestsLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadChildInvites() async {
+    if (_role != 'child') {
+      if (mounted) {
+        setState(() {
+          _childInvites = const [];
+          _childInvitesError = null;
+          _childInvitesLoading = false;
+        });
+      }
+      return;
+    }
+    setState(() {
+      _childInvitesLoading = true;
+      _childInvitesError = null;
+    });
+    try {
+      final invites = await FamilyService.fetchChildInvites();
+      if (!mounted) return;
+      setState(() {
+        _childInvites = invites;
+        _childInvitesLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _childInvitesError = 'Failed to load invites: $e';
+        _childInvitesLoading = false;
       });
     }
   }
@@ -633,6 +726,9 @@ class _ProfilePageState extends State<ProfilePage> {
     if (_role == 'parent' && _familyIdentifier != null) {
       _loadFamilyMembers();
     }
+    if (_role == 'child') {
+      _loadChildInvites();
+    }
   }
 
   @override
@@ -647,6 +743,7 @@ class _ProfilePageState extends State<ProfilePage> {
           await _fetchProfile();
           await _loadPreferences();
           await _loadFamilyMembers();
+          await _loadChildInvites();
         },
         child: ListView(
           children: [
@@ -694,6 +791,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
             const Divider(height: 0),
+            if (_role == 'child') ...[
+              _childInvitesCard(),
+              const Divider(height: 0),
+            ],
             if (inFamily) _leaveFamilyTile(),
             if (inFamily) const Divider(height: 0),
             _accountSettingsCard(),
@@ -1023,6 +1124,7 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
         if ((_familyMembers?.isMaster ?? false)) _leaveRequestsPanel(),
+        if (_role == 'parent') _familyInviteSection(),
       ],
     );
   }
@@ -1102,6 +1204,99 @@ class _ProfilePageState extends State<ProfilePage> {
               child: Text(
                 _familyUpdateSuccess!,
                 style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _familyInviteSection() {
+    if (_role != 'parent' || _familyIdentifier == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Invite a Child', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _inviteChildController,
+            decoration: const InputDecoration(
+              labelText: 'Child username',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _sendingInvite ? null : _sendChildInvite,
+            icon: _sendingInvite
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.send),
+            label: Text(_sendingInvite ? 'Sending...' : 'Send invite'),
+          ),
+          if (_inviteError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                _inviteError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              ),
+            ),
+          if (_inviteSuccess != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                _inviteSuccess!,
+                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _childInvitesCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Family Invitations', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          if (_childInvitesLoading)
+            const LinearProgressIndicator()
+          else if (_childInvitesError != null)
+            Text(
+              _childInvitesError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+            )
+          else if (_childInvites.isEmpty)
+            const Text('No invitations right now.'),
+          if (!_childInvitesLoading && _childInvites.isNotEmpty)
+            ..._childInvites.map(
+              (invite) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  "You're invited to join the \"${invite.familyName}\" family",
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text('Family ID: ${invite.familyId}'),
+                trailing: Wrap(
+                  spacing: 4,
+                  children: [
+                    IconButton(
+                      tooltip: 'Accept invite',
+                      icon: const Icon(Icons.check_circle, color: Colors.green),
+                      onPressed: _respondingInvite ? null : () => _respondToInvite(invite, true),
+                    ),
+                    IconButton(
+                      tooltip: 'Decline invite',
+                      icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                      onPressed: _respondingInvite ? null : () => _respondToInvite(invite, false),
+                    ),
+                  ],
+                ),
               ),
             ),
         ],

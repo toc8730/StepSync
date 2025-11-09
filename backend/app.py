@@ -79,6 +79,14 @@ class FamilyLeaveRequest(db.Model):
     status         = db.Column(db.String(20), nullable=False, default="pending")  # pending | resolved
     created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+class FamilyInvite(db.Model):
+    __tablename__ = "family_invites"
+    id             = db.Column(db.Integer, primary_key=True)
+    family_id      = db.Column(db.String(20), db.ForeignKey("families.family_id"), nullable=False)
+    child_username = db.Column(db.String(100), nullable=False)
+    status         = db.Column(db.String(20), nullable=False, default="pending")  # pending | accepted | rejected
+    created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
 with app.app_context():
     db.create_all()
     _insp = inspect(db.engine)
@@ -101,6 +109,9 @@ with app.app_context():
             conn.execute(text("ALTER TABLE users ADD COLUMN display_name TEXT"))
         with db.engine.begin() as conn:
             conn.execute(text("UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''"))
+    existing_tables = set(_insp.get_table_names())
+    if "family_invites" not in existing_tables:
+        FamilyInvite.__table__.create(db.engine, checkfirst=True)
 
 # -------------------- Helpers --------------------
 def _default_preferences() -> dict:
@@ -1315,6 +1326,114 @@ def family_update():
         "family": {"name": family.name, "identifier": family.family_id},
         "changed": changes,
     }), 200
+
+@app.route("/family/invite", methods=["POST"])
+@jwt_required()
+def family_invite_send():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can send invites."}), 403
+
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "Join a family before inviting children."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    child_username = (payload.get("child_username") or payload.get("username") or "").strip()
+    if not child_username:
+        return jsonify({"error": "Child username required."}), 400
+    if child_username == user.username:
+        return jsonify({"error": "You cannot invite yourself."}), 400
+
+    child = User.query.filter_by(username=child_username).first()
+    if not child or child.account_type.lower() != "child":
+        return jsonify({"error": "Child account not found."}), 404
+
+    existing = FamilyInvite.query.filter_by(
+        family_id=family.family_id,
+        child_username=child_username,
+        status="pending",
+    ).first()
+    if existing:
+        return jsonify({"message": "An invite is already pending for this child."}), 200
+
+    invite = FamilyInvite(family_id=family.family_id, child_username=child_username)
+    db.session.add(invite)
+    db.session.commit()
+    return jsonify({"message": "Invitation sent."}), 200
+
+@app.route("/family/invite/my", methods=["GET"])
+@jwt_required()
+def family_invite_my():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "child":
+        return jsonify({"error": "Only child accounts receive invites."}), 403
+
+    invites = FamilyInvite.query.filter_by(
+        child_username=user.username,
+        status="pending",
+    ).order_by(FamilyInvite.created_at.asc()).all()
+    results = []
+    for inv in invites:
+        family = Family.query.filter_by(family_id=inv.family_id).first()
+        if not family:
+            continue
+        results.append({
+            "family_id": inv.family_id,
+            "family_name": family.name,
+            "created_at": inv.created_at.isoformat() if inv.created_at else None,
+        })
+    return jsonify({"invites": results}), 200
+
+@app.route("/family/invite/respond", methods=["POST"])
+@jwt_required()
+def family_invite_respond():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "child":
+        return jsonify({"error": "Only child accounts can respond to invites."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    family_id = (payload.get("family_id") or "").strip()
+    action = (payload.get("action") or "").strip().lower()
+    if not family_id or action not in ("accept", "approve", "reject", "deny"):
+        return jsonify({"error": "Provide family_id and action ('accept' or 'reject')."}), 400
+
+    invite = FamilyInvite.query.filter_by(
+        family_id=family_id,
+        child_username=user.username,
+        status="pending",
+    ).first()
+    if not invite:
+        return jsonify({"error": "Invite not found."}), 404
+
+    family = Family.query.filter_by(family_id=family_id).first()
+    if not family:
+        invite.status = "rejected"
+        db.session.commit()
+        return jsonify({"error": "Family no longer exists."}), 404
+
+    if action in ("reject", "deny"):
+        invite.status = "rejected"
+        db.session.commit()
+        return jsonify({"message": "Invite declined."}), 200
+
+    # accept path
+    if user.family_id and user.family_id != family_id:
+        # cannot accept now, keep pending
+        return jsonify({"error": "Leave your current family before accepting this invite."}), 409
+
+    invite.status = "accepted"
+    if not user.family_id:
+        user.family_id = family_id
+        user.family_joined_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"message": "Welcome to the family!", "family_id": family_id}), 200
 
 @app.route("/family/members", methods=["GET"])
 @jwt_required()
