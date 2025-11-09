@@ -185,11 +185,11 @@ def _family_parents(family: 'Family') -> list['User']:
     members = User.query.filter_by(family_id=family.family_id).all()
     return [m for m in members if m.account_type.lower() == "parent"]
 
-def _clear_child_tasks(child: 'User') -> None:
-    profile = _safe_profile_dict(child.profile_data)
+def _clear_user_tasks(user: 'User') -> None:
+    profile = _safe_profile_dict(user.profile_data)
     if profile.get("schedule_blocks"):
         profile["schedule_blocks"] = []
-        child.profile_data = json.dumps(profile)
+        user.profile_data = json.dumps(profile)
 
 def _detach_user_from_family(user: 'User') -> None:
     user.family_id = None
@@ -207,14 +207,65 @@ def _pick_longest_tenured_parent(family: 'Family', *, exclude: str | None = None
 def _delete_family_and_cleanup(family: 'Family') -> None:
     members = User.query.filter_by(family_id=family.family_id).all()
     for member in members:
-        if member.account_type.lower() == "child":
-            _clear_child_tasks(member)
+        _clear_user_tasks(member)
         _detach_user_from_family(member)
     FamilyLeaveRequest.query.filter_by(family_id=family.family_id).delete()
     db.session.delete(family)
 
+def _family_owner(family: 'Family') -> 'User | None':
+    if not family:
+        return None
+    return User.query.filter_by(username=family.creator_username).first()
+
+def _promote_existing_tasks_to_family(family: 'Family') -> None:
+    owner = _family_owner(family)
+    if not owner:
+        return
+    prof = _safe_profile_dict(owner.profile_data)
+    updated = False
+    for block in prof["schedule_blocks"]:
+        tag = (block.get("family_tag") or "").strip()
+        if tag:
+            continue
+        tag = f"fam-{secrets.token_hex(8)}"
+        block["family_tag"] = tag
+        updated = True
+    if updated:
+        owner.profile_data = json.dumps(prof)
+    for child in _family_children(family):
+        _sync_family_blocks_to_member(child, family)
+
+def _sync_family_blocks_to_member(member: 'User', family: 'Family') -> None:
+    owner = _family_owner(family)
+    if not owner:
+        return
+    owner_prof = _safe_profile_dict(owner.profile_data)
+    owner_blocks = [
+        block for block in owner_prof["schedule_blocks"]
+        if (block.get("family_tag") or "").strip()
+    ]
+    if not owner_blocks:
+        return
+    member_prof = _safe_profile_dict(member.profile_data)
+    existing_tags = {
+        (block.get("family_tag") or "").strip()
+        for block in member_prof["schedule_blocks"]
+        if (block.get("family_tag") or "").strip()
+    }
+    changed = False
+    for block in owner_blocks:
+        tag = (block.get("family_tag") or "").strip()
+        if not tag or tag in existing_tags:
+            continue
+        member_prof["schedule_blocks"].append(dict(block))
+        existing_tags.add(tag)
+        changed = True
+    if changed:
+        member.profile_data = json.dumps(member_prof)
+
 def _handle_parent_leave(user: 'User', family: 'Family') -> str:
     was_master = family.creator_username == user.username
+    _clear_user_tasks(user)
     _detach_user_from_family(user)
     message = "Left family."
     if was_master:
@@ -1261,6 +1312,7 @@ def create_family():
     if user:
         user.family_id = family_id
         user.family_joined_at = datetime.utcnow()
+        _promote_existing_tasks_to_family(fam)
 
     db.session.commit()
     return jsonify({"message": "Family created", "family_id": fam.family_id}), 200
@@ -1284,6 +1336,9 @@ def join_family():
 
     user.family_id = family_id
     user.family_joined_at = datetime.utcnow()
+    if user.account_type.lower() == "child":
+        _clear_user_tasks(user)
+        _sync_family_blocks_to_member(user, fam)
     db.session.commit()
     return jsonify({"message": "Joined family successfully"}), 200
 
@@ -1435,8 +1490,14 @@ def family_invite_respond():
 
     invite.status = "accepted"
     if not user.family_id:
+        _clear_user_tasks(user)
         user.family_id = family_id
         user.family_joined_at = datetime.utcnow()
+        if user.account_type.lower() == "child":
+            _sync_family_blocks_to_member(user, family)
+    else:
+        if user.account_type.lower() == "child":
+            _sync_family_blocks_to_member(user, family)
     db.session.commit()
     return jsonify({"message": "Welcome to the family!", "family_id": family_id}), 200
 
@@ -1502,8 +1563,7 @@ def family_member_remove():
     if not target or target.family_id != family.family_id:
         return jsonify({"error": "User is not part of this family"}), 404
 
-    if target.account_type.lower() == "child":
-        _clear_child_tasks(target)
+    _clear_user_tasks(target)
     _detach_user_from_family(target)
     FamilyLeaveRequest.query.filter_by(family_id=family.family_id, child_username=target.username).delete()
     db.session.commit()
@@ -1601,7 +1661,7 @@ def family_leave_requests_handle():
     child = User.query.filter_by(username=child_username).first()
     if approved:
         if child and child.family_id == family.family_id:
-            _clear_child_tasks(child)
+            _clear_user_tasks(child)
             _detach_user_from_family(child)
             success = True
         else:

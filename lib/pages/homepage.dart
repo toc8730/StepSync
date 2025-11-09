@@ -100,7 +100,7 @@ class _HomePageState extends State<HomePage> {
         'family_tag': t.familyTag,
       };
 
-  Future<void> _serverAdd(Task t) async {
+  Future<bool> _serverAdd(Task t) async {
     try {
       final res = await http.post(
         Uri.parse('$_base/profile/block/add'),
@@ -120,12 +120,16 @@ class _HomePageState extends State<HomePage> {
             t.familyTag = tag.isEmpty ? null : tag;
           }
         } catch (_) {}
-      } else if (res.statusCode != 200) {
+        return true;
+      } else if (res.statusCode == 200) {
+        return true;
+      } else {
         _toast('Server add failed (${res.statusCode})');
       }
     } catch (e) {
       _toast('Add error: $e');
     }
+    return false;
   }
 
   Future<void> _serverEdit(Task oldT, Task newT) async {
@@ -219,11 +223,12 @@ class _HomePageState extends State<HomePage> {
     String? familyTag,
   }) {
     final map = Map<String, dynamic>.from(payload);
-    if (forFamily) {
+    final tagInPayload = (familyTag ?? _extractFamilyTag(map))?.trim();
+    final shouldApplyToFamily = forFamily || (tagInPayload != null && tagInPayload.isNotEmpty);
+    if (shouldApplyToFamily) {
       map['apply_to_family'] = true;
-      final tag = (familyTag ?? _extractFamilyTag(map))?.trim();
-      if (tag != null && tag.isNotEmpty) {
-        map['family_tag'] = tag;
+      if (tagInPayload != null && tagInPayload.isNotEmpty) {
+        map['family_tag'] = tagInPayload;
       }
     } else if (_selectedChild != null && _selectedChild!.isNotEmpty) {
       map['target_child'] = _selectedChild;
@@ -281,7 +286,8 @@ class _HomePageState extends State<HomePage> {
     final Task? task = await TaskEditorDialog.show(context);
     if (task != null && mounted) {
       setState(() => _ctrl.add(task));
-      _serverAdd(task);
+      final ok = await _serverAdd(task);
+      if (!ok) await _loadFromServer();
       _snack('Task added');
     }
   }
@@ -290,7 +296,8 @@ class _HomePageState extends State<HomePage> {
     final Task? templated = await TemplatePickerDialog.pickAndEdit(context);
     if (templated != null && mounted) {
       setState(() => _ctrl.add(templated));
-      _serverAdd(templated);
+      final ok = await _serverAdd(templated);
+      if (!ok) await _loadFromServer();
       _snack('Template added');
     }
   }
@@ -304,8 +311,9 @@ class _HomePageState extends State<HomePage> {
         }
       });
       for (final t in tasks) {
-        _serverAdd(t);
+        await _serverAdd(t);
       }
+      await _loadFromServer();
       _snack('${tasks.length} task${tasks.length == 1 ? '' : 's'} added from AI');
     }
   }
