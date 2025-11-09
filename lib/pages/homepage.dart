@@ -195,9 +195,11 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _children = children;
         _childrenLoading = false;
-        _childrenError = members == null ? 'Unable to load family info.' : null;
         _pendingLeaveRequests =
             (members != null && members.isMaster) ? members.pendingRequests : 0;
+        _childrenError = (members == null && _selectedChild != null)
+            ? 'Unable to load family info.'
+            : null;
         if (missingSelection || children.isEmpty) _selectedChild = null;
       });
       if (missingSelection) _loadFromServer();
@@ -205,7 +207,9 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() {
         _childrenLoading = false;
-        _childrenError = 'Failed to load children: $e';
+        _childrenError = (_children.isNotEmpty)
+            ? 'Unable to load family info.'
+            : null;
         _pendingLeaveRequests = 0;
       });
     }
