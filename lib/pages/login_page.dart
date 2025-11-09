@@ -194,20 +194,20 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<String?> _obtainIdToken(GoogleSignInAccount account) async {
-    Future<String?> _tokenFor(GoogleSignInAccount acc) async {
+    Future<String?> tokenFor(GoogleSignInAccount acc) async {
       final auth = await acc.authentication;
       final tok = auth.idToken;
       if (tok != null && tok.isNotEmpty) return tok;
       return null;
     }
 
-    final direct = await _tokenFor(account);
+    final direct = await tokenFor(account);
     if (direct != null) return direct;
 
     // Occasional bug on macOS/iOS returns null until we re-fetch the account.
     final refreshed = await _googleSignIn.signInSilently();
     if (refreshed != null) {
-      final retry = await _tokenFor(refreshed);
+      final retry = await tokenFor(refreshed);
       if (retry != null) return retry;
     }
 
@@ -215,7 +215,7 @@ class _LoginPageState extends State<LoginPage> {
     await _googleSignIn.signOut();
     final reauth = await _googleSignIn.signInSilently();
     if (reauth != null) {
-      return _tokenFor(reauth);
+      return tokenFor(reauth);
     }
     return null;
   }

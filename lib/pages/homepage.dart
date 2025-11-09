@@ -399,7 +399,7 @@ class _HomePageState extends State<HomePage> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.6),
         border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Column(

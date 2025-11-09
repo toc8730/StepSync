@@ -1271,6 +1271,51 @@ def join_family():
     db.session.commit()
     return jsonify({"message": "Joined family successfully"}), 200
 
+@app.route("/family/update", methods=["POST"])
+@jwt_required()
+def family_update():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    family = _family_for_user(user)
+    if not family:
+        return jsonify({"error": "User is not part of a family"}), 400
+    if user.account_type.lower() != "parent" or family.creator_username != user.username:
+        return jsonify({"error": "Only the master parent can update the family."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    current_password = (payload.get("current_password") or payload.get("password") or "").strip()
+    if not current_password:
+        return jsonify({"error": "Current family password is required."}), 400
+    if not check_password_hash(family.password, current_password):
+        return jsonify({"error": "Incorrect family password."}), 403
+
+    new_name = (payload.get("name") or payload.get("new_name") or "").strip()
+    new_password = (payload.get("new_password") or "").strip()
+
+    changes: list[str] = []
+    if new_name and new_name != family.name:
+        if len(new_name) > 16:
+            return jsonify({"error": "Family name must be at most 16 characters."}), 400
+        family.name = new_name
+        changes.append("name")
+
+    if new_password:
+        if not (8 <= len(new_password) <= 20):
+            return jsonify({"error": "Family password must be 8–20 characters."}), 400
+        family.password = generate_password_hash(new_password)
+        changes.append("password")
+
+    if not changes:
+        return jsonify({"error": "Provide a new name and/or password to update."}), 400
+
+    db.session.commit()
+    return jsonify({
+        "message": "Family updated.",
+        "family": {"name": family.name, "identifier": family.family_id},
+        "changed": changes,
+    }), 200
+
 @app.route("/family/members", methods=["GET"])
 @jwt_required()
 def family_members():

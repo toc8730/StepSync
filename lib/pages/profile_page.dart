@@ -46,15 +46,24 @@ class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController _confirmPasswordController = TextEditingController();
   final TextEditingController _currentPasswordController = TextEditingController();
   final TextEditingController _googlePasswordController = TextEditingController();
+  final TextEditingController _familyNameController = TextEditingController();
+  final TextEditingController _familyNewPasswordController = TextEditingController();
+  final TextEditingController _familyConfirmPasswordController = TextEditingController();
+  final TextEditingController _familyCurrentPasswordController = TextEditingController();
   bool _showNewPassword = false;
   bool _showCurrentPassword = false;
   bool _showGooglePassword = false;
+  bool _showFamilyNewPassword = false;
+  bool _showFamilyCurrentPassword = false;
   bool _updatingCredentials = false;
   bool _switchingGoogle = false;
+  bool _updatingFamily = false;
   String? _accountError;
   String? _accountSuccess;
   String? _googleError;
   String? _googleSuccess;
+  String? _familyUpdateError;
+  String? _familyUpdateSuccess;
   bool _leaveLoading = false;
   bool _leaveRequestsLoading = false;
   String? _leaveRequestsError;
@@ -89,6 +98,10 @@ class _ProfilePageState extends State<ProfilePage> {
     _confirmPasswordController.dispose();
     _currentPasswordController.dispose();
     _googlePasswordController.dispose();
+    _familyNameController.dispose();
+    _familyNewPasswordController.dispose();
+    _familyConfirmPasswordController.dispose();
+    _familyCurrentPasswordController.dispose();
     super.dispose();
   }
 
@@ -202,6 +215,87 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       if (!mounted) return;
       _showSnack(_friendlyError(e));
+    }
+  }
+
+  Future<void> _updateFamilySettings() async {
+    final requestedName = _familyNameController.text.trim();
+    final currentFamilyName = _familyName ?? '';
+    final newName = (requestedName.isNotEmpty && requestedName != currentFamilyName) ? requestedName : '';
+    final newPassword = _familyNewPasswordController.text;
+    final confirmPassword = _familyConfirmPasswordController.text;
+    final currentPassword = _familyCurrentPasswordController.text.trim();
+
+    if (newName.isEmpty && newPassword.isEmpty) {
+      setState(() {
+        _familyUpdateError = 'Enter a new family name and/or password.';
+        _familyUpdateSuccess = null;
+      });
+      return;
+    }
+    if (currentPassword.isEmpty) {
+      setState(() {
+        _familyUpdateError = 'Enter the current family password to confirm changes.';
+        _familyUpdateSuccess = null;
+      });
+      return;
+    }
+    if (newName.isNotEmpty && newName.length > 16) {
+      setState(() {
+        _familyUpdateError = 'Family name must be 16 characters or fewer.';
+        _familyUpdateSuccess = null;
+      });
+      return;
+    }
+    if (newPassword.isNotEmpty) {
+      if (newPassword.length < 8 || newPassword.length > 20) {
+        setState(() {
+          _familyUpdateError = 'Family password must be 8–20 characters.';
+          _familyUpdateSuccess = null;
+        });
+        return;
+      }
+      if (newPassword != confirmPassword) {
+        setState(() {
+          _familyUpdateError = 'Family passwords do not match.';
+          _familyUpdateSuccess = null;
+        });
+        return;
+      }
+    }
+
+    setState(() {
+      _familyUpdateError = null;
+      _familyUpdateSuccess = null;
+      _updatingFamily = true;
+    });
+
+    try {
+      final message = await FamilyService.updateFamily(
+        newName: newName.isEmpty ? null : newName,
+        newPassword: newPassword.isEmpty ? null : newPassword,
+        currentPassword: currentPassword,
+      );
+      if (!mounted) return;
+      setState(() {
+        _familyUpdateSuccess = message;
+        _familyUpdateError = null;
+      });
+      if (newPassword.isNotEmpty) {
+        _familyNewPasswordController.clear();
+        _familyConfirmPasswordController.clear();
+      }
+      _familyCurrentPasswordController.clear();
+      await _fetchProfile();
+      await _loadFamilyMembers();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _familyUpdateError = _friendlyError(e);
+        _familyUpdateSuccess = null;
+      });
+    } finally {
+      if (mounted) setState(() => _updatingFamily = false);
     }
   }
 
@@ -527,6 +621,7 @@ class _ProfilePageState extends State<ProfilePage> {
       _email = emailRaw.isEmpty ? null : emailRaw;
       _authProvider = providerRaw.isEmpty ? 'password' : providerRaw;
       _familyName = famName;
+      _familyNameController.text = famName ?? '';
       _familyIdentifier = famId;
       _loading = false;
       _error = null;
@@ -566,10 +661,11 @@ class _ProfilePageState extends State<ProfilePage> {
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             ),
             const Divider(height: 0),
-            if (_familyIdentifier != null && _role == 'parent')
+            if (_familyIdentifier != null && _role == 'parent') ...[
               _familyManagementCard(),
-            if (_familyIdentifier != null && _role == 'parent')
+              if (_familyMembers?.isMaster ?? false) _familySettingsCard(),
               const Divider(height: 0),
+            ],
             ListTile(
               leading: const Icon(Icons.light_mode_outlined),
               title: const Text('Theme'),
@@ -928,6 +1024,88 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         if ((_familyMembers?.isMaster ?? false)) _leaveRequestsPanel(),
       ],
+    );
+  }
+
+  Widget _familySettingsCard() {
+    final currentName = _familyName ?? '—';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Family Settings', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _familyNameController,
+            decoration: InputDecoration(
+              labelText: 'New family name',
+              helperText: 'Current name: $currentName',
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _familyNewPasswordController,
+            obscureText: !_showFamilyNewPassword,
+            decoration: InputDecoration(
+              labelText: 'New family password',
+              helperText: 'Leave blank to keep the existing password.',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(_showFamilyNewPassword ? Icons.visibility : Icons.visibility_off),
+                onPressed: () => setState(() => _showFamilyNewPassword = !_showFamilyNewPassword),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _familyConfirmPasswordController,
+            obscureText: !_showFamilyNewPassword,
+            decoration: const InputDecoration(
+              labelText: 'Confirm new family password',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _familyCurrentPasswordController,
+            obscureText: !_showFamilyCurrentPassword,
+            decoration: InputDecoration(
+              labelText: 'Current family password *',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(_showFamilyCurrentPassword ? Icons.visibility : Icons.visibility_off),
+                onPressed: () => setState(() => _showFamilyCurrentPassword = !_showFamilyCurrentPassword),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _updatingFamily ? null : _updateFamilySettings,
+            icon: _updatingFamily
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.save),
+            label: Text(_updatingFamily ? 'Saving...' : 'Save family changes'),
+          ),
+          if (_familyUpdateError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _familyUpdateError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              ),
+            ),
+          if (_familyUpdateSuccess != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _familyUpdateSuccess!,
+                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

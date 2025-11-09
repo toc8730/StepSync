@@ -57,7 +57,7 @@ class FamilyService {
     final list = body['requests'];
     if (list is List) {
       return list
-          .where((item) => item is Map)
+          .whereType<Map>()
           .map((item) => LeaveRequestInfo.fromJson(Map<String, dynamic>.from(item as Map)))
           .toList();
     }
@@ -78,6 +78,29 @@ class FamilyService {
       return (body['message'] ?? 'Request updated.').toString();
     }
     throw Exception(body['error'] ?? 'Unable to update leave request.');
+  }
+
+  static Future<String> updateFamily({
+    String? newName,
+    String? newPassword,
+    required String currentPassword,
+  }) async {
+    final payload = <String, String>{
+      'current_password': currentPassword,
+      if (newName != null && newName.trim().isNotEmpty) 'name': newName.trim(),
+      if (newPassword != null && newPassword.isNotEmpty) 'new_password': newPassword,
+    };
+
+    final res = await http.post(
+      Uri.parse('$_baseUrl/family/update'),
+      headers: _headers(),
+      body: json.encode(payload),
+    );
+    final body = _decodeBody(res.body);
+    if (res.statusCode == 200) {
+      return (body['message'] ?? 'Family updated.').toString();
+    }
+    throw Exception(body['error'] ?? 'Unable to update family.');
   }
 
   static Map<String, dynamic> _decodeBody(String body) {
@@ -113,9 +136,9 @@ class FamilyMembers {
   final List<FamilyMember> children;
 
   factory FamilyMembers.fromJson(Map<String, dynamic> json) {
-    List<FamilyMember> _parseMembers(List list, {bool parents = false}) {
+    List<FamilyMember> parseMembers(List list, {bool parents = false}) {
       return list
-          .where((element) => element is Map)
+          .whereType<Map>()
           .map((element) => Map<String, dynamic>.from(element as Map))
           .map((m) => FamilyMember(
                 username: (m['username'] ?? '').toString(),
@@ -133,8 +156,8 @@ class FamilyMembers {
       familyId: (json['family_id'] ?? '').toString(),
       isMaster: json['is_master'] == true,
       pendingRequests: json['pending_leave_requests'] is int ? json['pending_leave_requests'] as int : 0,
-      parents: _parseMembers(parentsList, parents: true),
-      children: _parseMembers(childrenList),
+      parents: parseMembers(parentsList, parents: true),
+      children: parseMembers(childrenList),
     );
   }
 

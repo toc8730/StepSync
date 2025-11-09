@@ -13,16 +13,16 @@ class AccountUpdateResponse {
   final String? token;
 
   factory AccountUpdateResponse.fromJson(Map<String, dynamic> json) {
-    String? _clean(String? value) {
+    String? clean(String? value) {
       if (value == null) return null;
       final trimmed = value.trim();
       return trimmed.isEmpty ? null : trimmed;
     }
 
     return AccountUpdateResponse(
-      username: _clean(json['username']?.toString()),
-      email: _clean(json['email']?.toString()),
-      token: _clean(json['token']?.toString()),
+      username: clean(json['username']?.toString()),
+      email: clean(json['email']?.toString()),
+      token: clean(json['token']?.toString()),
     );
   }
 }
