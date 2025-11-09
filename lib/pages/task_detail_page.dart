@@ -243,14 +243,11 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        AspectRatio(
-          aspectRatio: 4 / 3,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: Image.memory(
-              images.first,
-              fit: BoxFit.cover,
-            ),
+      ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            images.first,
+            fit: BoxFit.contain,
           ),
         ),
         if (images.length > 1) ...[
