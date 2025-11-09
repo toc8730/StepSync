@@ -88,6 +88,19 @@ class FamilyInvite(db.Model):
     status         = db.Column(db.String(20), nullable=False, default="pending")  # pending | accepted | rejected
     created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+class TaskTemplateEntry(db.Model):
+    __tablename__ = "task_templates"
+    id = db.Column(db.String(40), primary_key=True)
+    owner_username = db.Column(db.String(100), db.ForeignKey("users.username"), nullable=False)
+    family_id = db.Column(db.String(20), nullable=True)
+    scope = db.Column(db.String(20), nullable=False, default="personal")  # personal | family
+    title = db.Column(db.String(120), nullable=False)
+    steps_json = db.Column(db.Text, nullable=False, default="[]")
+    start_time = db.Column(db.String(10), nullable=True)
+    end_time = db.Column(db.String(10), nullable=True)
+    period = db.Column(db.String(5), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
 with app.app_context():
     db.create_all()
     _insp = inspect(db.engine)
@@ -113,6 +126,8 @@ with app.app_context():
     existing_tables = set(_insp.get_table_names())
     if "family_invites" not in existing_tables:
         FamilyInvite.__table__.create(db.engine, checkfirst=True)
+    if "task_templates" not in existing_tables:
+        TaskTemplateEntry.__table__.create(db.engine, checkfirst=True)
     leave_columns = {col["name"] for col in _insp.get_columns("family_leave_requests")}
     if "child_local_time" not in leave_columns:
         with db.engine.begin() as conn:
@@ -146,10 +161,68 @@ def _rand_family_id(n: int = 10) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(n))
 
+def _rand_template_id() -> str:
+    return secrets.token_hex(12)
+
 def _family_for_user(user: 'User') -> 'Family | None':
     if not user.family_id:
         return None
     return Family.query.filter_by(family_id=user.family_id).first()
+
+def _serialize_template_entry(entry: TaskTemplateEntry, viewer: str, viewer_is_master: bool = False) -> dict:
+    steps: list[str] = []
+    if entry.steps_json:
+        try:
+            data = json.loads(entry.steps_json)
+            if isinstance(data, list):
+                steps = [str(s) for s in data if str(s).strip()]
+        except Exception:
+            steps = []
+    return {
+        "id": entry.id,
+        "title": entry.title,
+        "steps": steps,
+        "start": entry.start_time,
+        "end": entry.end_time,
+        "period": entry.period,
+        "scope": entry.scope,
+        "owner": entry.owner_username,
+        "can_delete": entry.owner_username == viewer or (entry.scope == "family" and viewer_is_master),
+        "can_edit": entry.owner_username == viewer or (entry.scope == "family" and viewer_is_master),
+        "shared_with_family": entry.scope == "family",
+    }
+
+def _clone_family_templates_to_user(user: 'User', family_id: str) -> None:
+    if not family_id:
+        return
+    entries = TaskTemplateEntry.query.filter_by(scope="family", family_id=family_id).all()
+    for entry in entries:
+        clone = TaskTemplateEntry(
+            id=_rand_template_id(),
+            owner_username=user.username,
+            scope="personal",
+            title=entry.title,
+            steps_json=entry.steps_json,
+            start_time=entry.start_time,
+            end_time=entry.end_time,
+            period=entry.period,
+        )
+        db.session.add(clone)
+
+def _delete_family_templates(family_id: str) -> None:
+    if not family_id:
+        return
+    TaskTemplateEntry.query.filter_by(scope="family", family_id=family_id).delete()
+
+def _can_manage_template(user: 'User', entry: TaskTemplateEntry) -> bool:
+    if entry.owner_username == user.username:
+        return True
+    if entry.scope != "family":
+        return False
+    family = _family_for_user(user)
+    if not family or family.family_id != entry.family_id:
+        return False
+    return family.creator_username == user.username
 
 def _user_display_name(user: 'User | None') -> str:
     if not user:
@@ -265,6 +338,9 @@ def _sync_family_blocks_to_member(member: 'User', family: 'Family') -> None:
 
 def _handle_parent_leave(user: 'User', family: 'Family') -> str:
     was_master = family.creator_username == user.username
+    original_family_id = family.family_id
+    if was_master:
+        _clone_family_templates_to_user(user, original_family_id)
     _clear_user_tasks(user)
     _detach_user_from_family(user)
     message = "Left family."
@@ -275,6 +351,7 @@ def _handle_parent_leave(user: 'User', family: 'Family') -> str:
             message = f"Transferred master role to {replacement.username}."
         else:
             _delete_family_and_cleanup(family)
+            _delete_family_templates(original_family_id)
             message = "Family deleted because no parents remained."
     return message
 
@@ -1241,6 +1318,171 @@ def block_delete():
         return jsonify({"error": "Block not found"}), 404
 
     return jsonify({"error": "Provide 'index' or 'block'"}), 400
+
+# -------------------- Task Templates --------------------
+@app.route("/templates", methods=["GET"])
+@jwt_required()
+def list_templates():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can manage templates."}), 403
+
+    family = _family_for_user(user) if user.family_id else None
+    viewer_is_master = bool(family and family.creator_username == user.username)
+
+    personal_entries = (
+        TaskTemplateEntry.query.filter_by(owner_username=user.username, scope="personal")
+        .order_by(TaskTemplateEntry.created_at.desc())
+        .all()
+    )
+    family_entries: list[TaskTemplateEntry] = []
+    if user.family_id:
+        family_entries = (
+            TaskTemplateEntry.query.filter_by(scope="family", family_id=user.family_id)
+            .order_by(TaskTemplateEntry.created_at.desc())
+            .all()
+        )
+
+    return jsonify({
+        "personal": [_serialize_template_entry(entry, user.username) for entry in personal_entries],
+        "family": [_serialize_template_entry(entry, user.username, viewer_is_master) for entry in family_entries],
+    }), 200
+
+@app.route("/templates", methods=["POST"])
+@jwt_required()
+def create_template():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can create templates."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Template title is required."}), 400
+    if len(title) > 120:
+        return jsonify({"error": "Template title must be 1–120 characters."}), 400
+
+    raw_steps = payload.get("steps") if isinstance(payload.get("steps"), list) else []
+    steps: list[str] = []
+    if isinstance(raw_steps, list):
+        for step in raw_steps:
+            text = str(step).strip()
+            if text:
+                steps.append(text[:200])
+            if len(steps) >= 20:
+                break
+
+    start = (payload.get("start") or payload.get("start_time") or "").strip()
+    start = start[:10] if start else None
+    end = (payload.get("end") or payload.get("end_time") or "").strip()
+    end = end[:10] if end else None
+    period = (payload.get("period") or "").strip().upper()
+    if period not in ("AM", "PM"):
+        period = None
+
+    share = bool(payload.get("share_with_family"))
+    scope = "personal"
+    family_id = None
+    if share:
+        family = _family_for_user(user)
+        if not family or family.creator_username != user.username:
+            return jsonify({"error": "Only the master parent can share templates with all parents."}), 403
+        scope = "family"
+        family_id = family.family_id
+
+    entry = TaskTemplateEntry(
+        id=_rand_template_id(),
+        owner_username=user.username,
+        family_id=family_id,
+        scope=scope,
+        title=title,
+        steps_json=json.dumps(steps),
+        start_time=start,
+        end_time=end,
+        period=period,
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+    bucket = "family" if scope == "family" else "personal"
+    viewer_is_master = scope == "family"
+    return jsonify({
+        "template": _serialize_template_entry(entry, user.username, viewer_is_master),
+        "bucket": bucket,
+    }), 200
+
+@app.route("/templates/<template_id>", methods=["DELETE"])
+@jwt_required()
+def delete_template(template_id: str):
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can delete templates."}), 403
+
+    entry = TaskTemplateEntry.query.filter_by(id=template_id).first()
+    if not entry:
+        return jsonify({"error": "Template not found"}), 404
+    if not _can_manage_template(user, entry):
+        return jsonify({"error": "You do not have permission to delete this template."}), 403
+
+    db.session.delete(entry)
+    db.session.commit()
+    return jsonify({"message": "Template deleted."}), 200
+
+@app.route("/templates/<template_id>", methods=["PUT", "PATCH"])
+@jwt_required()
+def update_template(template_id: str):
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can edit templates."}), 403
+
+    entry = TaskTemplateEntry.query.filter_by(id=template_id).first()
+    if not entry:
+        return jsonify({"error": "Template not found"}), 404
+    if not _can_manage_template(user, entry):
+        return jsonify({"error": "You do not have permission to edit this template."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Template title is required."}), 400
+    if len(title) > 120:
+        return jsonify({"error": "Template title must be 1–120 characters."}), 400
+
+    raw_steps = payload.get("steps") if isinstance(payload.get("steps"), list) else []
+    steps: list[str] = []
+    if isinstance(raw_steps, list):
+        for step in raw_steps:
+            text = str(step).strip()
+            if text:
+                steps.append(text[:200])
+            if len(steps) >= 20:
+                break
+
+    start = (payload.get("start") or payload.get("start_time") or "").strip()
+    start = start[:10] if start else None
+    end = (payload.get("end") or payload.get("end_time") or "").strip()
+    end = end[:10] if end else None
+    period = (payload.get("period") or "").strip().upper()
+    if period not in ("AM", "PM"):
+        period = None
+
+    entry.title = title
+    entry.steps_json = json.dumps(steps)
+    entry.start_time = start
+    entry.end_time = end
+    entry.period = period
+    db.session.commit()
+
+    viewer_is_master = entry.scope == "family" and _can_manage_template(user, entry)
+    return jsonify({"template": _serialize_template_entry(entry, user.username, viewer_is_master)}), 200
 
 @app.route("/profile/preferences", methods=["GET", "POST"])
 @jwt_required()

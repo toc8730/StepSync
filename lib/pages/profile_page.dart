@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:my_app/config/backend_config.dart';
@@ -1038,7 +1039,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   child: ListTile(
                     leading: const Icon(Icons.person_outline),
                     title: const Text('Profile'),
-                    subtitle: Text(_buildProfileSubtitle(isParent)),
+                    subtitle: _buildProfileSubtitle(isParent),
                     isThreeLine: true,
                   ),
                 ),
@@ -1089,6 +1090,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             }),
                   ),
                 ),
+                if (inFamily) _leaveFamilyTile(),
                 if (_familyIdentifier != null && _role == 'parent') ...[
                   _familyManagementCard(),
                   if (_familyMembers?.isMaster ?? false) _familySettingsCard(),
@@ -1122,9 +1124,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       _prefsError!,
                       style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
                     ),
-                  ),
+                ),
                 if (_role == 'child') _childInvitesCard(),
-                if (inFamily) _leaveFamilyTile(),
                 _accountSettingsCard(),
                 if (_authProvider == 'google') _googleAccountCard(),
               ],
@@ -1135,18 +1136,46 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  String _buildProfileSubtitle(bool isParent) {
-    final u = _username.isEmpty ? '—' : _username;
-    final d = _displayName.isEmpty ? '—' : _displayName;
-    final rolePretty = _role.isEmpty ? '—' : (_role[0].toUpperCase() + _role.substring(1));
-    final famName = _familyName ?? 'None';
-    final emailLine = '\nEmail: ${_email ?? '—'}';
-    final famIdLine = isParent ? '\nFamily Identifier: ${_familyIdentifier ?? 'None'}' : '';
-    return 'Username: $u'
-           '\nDisplay Name: $d'
-           '$emailLine'
-           '\nAccount Type: $rolePretty'
-           '\nFamily Name: $famName$famIdLine';
+  Widget _buildProfileSubtitle(bool isParent) {
+    final lines = <String>[
+      'Username: ${_username.isEmpty ? '—' : _username}',
+      'Display Name: ${_displayName.isEmpty ? '—' : _displayName}',
+      'Email: ${_email ?? '—'}',
+      'Account Type: ${_role.isEmpty ? '—' : (_role[0].toUpperCase() + _role.substring(1))}',
+      'Family Name: ${_familyName ?? 'None'}',
+    ];
+    if (!isParent) {
+      return Text(lines.join('\n'));
+    }
+    final id = _familyIdentifier;
+    final hasId = id != null && id.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final line in lines) Text(line),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text('Family Identifier: ${hasId ? id : 'None'}'),
+            ),
+            if (hasId)
+              IconButton(
+                tooltip: 'Copy family identifier',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                iconSize: 16,
+                icon: const Icon(Icons.copy),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: id!));
+                  _showSnack('Family identifier copied.');
+                },
+              ),
+          ],
+        ),
+      ],
+    );
   }
 
   Widget _errorTile(BuildContext context, String msg) {

@@ -35,6 +35,7 @@ class _HomePageState extends State<HomePage> {
   bool _childrenLoading = false;
   String? _childrenError;
   int _pendingLeaveRequests = 0;
+  bool _isMasterParent = false;
 
   @override
   void initState() {
@@ -196,6 +197,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _children = children;
         _childrenLoading = false;
+        _isMasterParent = members?.isMaster ?? false;
         _pendingLeaveRequests =
             (members != null && members.isMaster) ? members.pendingRequests : 0;
         _childrenError = (members == null && _selectedChild != null)
@@ -212,6 +214,7 @@ class _HomePageState extends State<HomePage> {
             ? 'Unable to load family info.'
             : null;
         _pendingLeaveRequests = 0;
+        _isMasterParent = false;
       });
     }
   }
@@ -298,7 +301,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _addFromTemplate() async {
-    final Task? templated = await TemplatePickerDialog.pickAndEdit(context);
+    final Task? templated = await TemplatePickerDialog.pickAndEdit(
+      context,
+      canShareWithFamily: _isMasterParent,
+    );
     if (templated != null && mounted) {
       setState(() => _ctrl.add(templated));
       final ok = await _serverAdd(templated);

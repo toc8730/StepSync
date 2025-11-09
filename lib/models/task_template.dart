@@ -33,4 +33,30 @@ class TaskTemplate {
       hidden: false,
     );
   }
+
+  factory TaskTemplate.fromJson(Map<String, dynamic> json) {
+    List<String> parsedSteps = const <String>[];
+    if (json['steps'] is List) {
+      parsedSteps = (json['steps'] as List)
+          .map((step) => step == null ? '' : step.toString())
+          .where((step) => step.trim().isNotEmpty)
+          .cast<String>()
+          .toList();
+    }
+
+    String? cleanValue(Object? value, {bool uppercase = false}) {
+      final text = (value ?? '').toString().trim();
+      if (text.isEmpty) return null;
+      return uppercase ? text.toUpperCase() : text;
+    }
+
+    return TaskTemplate(
+      id: (json['id'] ?? json['template_id'] ?? json['slug'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      steps: parsedSteps,
+      start: cleanValue(json['start'] ?? json['start_time']),
+      end: cleanValue(json['end'] ?? json['end_time']),
+      period: cleanValue(json['period'], uppercase: true),
+    );
+  }
 }
