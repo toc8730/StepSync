@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -13,6 +14,11 @@ import 'package:my_app/config/google_oauth_config.dart';
 
 import 'create_family_page.dart';
 import 'join_family_page.dart';
+
+String _friendlyErrorMessage(Object error) {
+  final text = error.toString();
+  return text.startsWith('Exception: ') ? text.substring('Exception: '.length) : text;
+}
 
 class ProfilePage extends StatefulWidget {
   final String? initialUsername;
@@ -41,31 +47,14 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _membersLoading = false;
   String? _membersError;
   FamilyMembers? _familyMembers;
-  final TextEditingController _newUsernameController = TextEditingController();
-  final TextEditingController _newPasswordController = TextEditingController();
-  final TextEditingController _confirmPasswordController = TextEditingController();
-  final TextEditingController _currentPasswordController = TextEditingController();
   final TextEditingController _googlePasswordController = TextEditingController();
-  final TextEditingController _familyNameController = TextEditingController();
-  final TextEditingController _familyNewPasswordController = TextEditingController();
-  final TextEditingController _familyConfirmPasswordController = TextEditingController();
-  final TextEditingController _familyCurrentPasswordController = TextEditingController();
   final TextEditingController _inviteChildController = TextEditingController();
-  bool _showNewPassword = false;
-  bool _showCurrentPassword = false;
   bool _showGooglePassword = false;
-  bool _showFamilyNewPassword = false;
-  bool _showFamilyCurrentPassword = false;
   bool _updatingCredentials = false;
   bool _switchingGoogle = false;
-  bool _updatingFamily = false;
   bool _sendingInvite = false;
-  String? _accountError;
-  String? _accountSuccess;
   String? _googleError;
   String? _googleSuccess;
-  String? _familyUpdateError;
-  String? _familyUpdateSuccess;
   String? _inviteError;
   String? _inviteSuccess;
   bool _leaveLoading = false;
@@ -101,15 +90,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
-    _newUsernameController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
-    _currentPasswordController.dispose();
     _googlePasswordController.dispose();
-    _familyNameController.dispose();
-    _familyNewPasswordController.dispose();
-    _familyConfirmPasswordController.dispose();
-    _familyCurrentPasswordController.dispose();
     _inviteChildController.dispose();
     super.dispose();
   }
@@ -223,88 +204,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await _loadLeaveRequests();
     } catch (e) {
       if (!mounted) return;
-      _showSnack(_friendlyError(e));
-    }
-  }
-
-  Future<void> _updateFamilySettings() async {
-    final requestedName = _familyNameController.text.trim();
-    final currentFamilyName = _familyName ?? '';
-    final newName = (requestedName.isNotEmpty && requestedName != currentFamilyName) ? requestedName : '';
-    final newPassword = _familyNewPasswordController.text;
-    final confirmPassword = _familyConfirmPasswordController.text;
-    final currentPassword = _familyCurrentPasswordController.text.trim();
-
-    if (newName.isEmpty && newPassword.isEmpty) {
-      setState(() {
-        _familyUpdateError = 'Enter a new family name and/or password.';
-        _familyUpdateSuccess = null;
-      });
-      return;
-    }
-    if (currentPassword.isEmpty) {
-      setState(() {
-        _familyUpdateError = 'Enter the current family password to confirm changes.';
-        _familyUpdateSuccess = null;
-      });
-      return;
-    }
-    if (newName.isNotEmpty && newName.length > 16) {
-      setState(() {
-        _familyUpdateError = 'Family name must be 16 characters or fewer.';
-        _familyUpdateSuccess = null;
-      });
-      return;
-    }
-    if (newPassword.isNotEmpty) {
-      if (newPassword.length < 8 || newPassword.length > 20) {
-        setState(() {
-          _familyUpdateError = 'Family password must be 8–20 characters.';
-          _familyUpdateSuccess = null;
-        });
-        return;
-      }
-      if (newPassword != confirmPassword) {
-        setState(() {
-          _familyUpdateError = 'Family passwords do not match.';
-          _familyUpdateSuccess = null;
-        });
-        return;
-      }
-    }
-
-    setState(() {
-      _familyUpdateError = null;
-      _familyUpdateSuccess = null;
-      _updatingFamily = true;
-    });
-
-    try {
-      final message = await FamilyService.updateFamily(
-        newName: newName.isEmpty ? null : newName,
-        newPassword: newPassword.isEmpty ? null : newPassword,
-        currentPassword: currentPassword,
-      );
-      if (!mounted) return;
-      setState(() {
-        _familyUpdateSuccess = message;
-        _familyUpdateError = null;
-      });
-      if (newPassword.isNotEmpty) {
-        _familyNewPasswordController.clear();
-        _familyConfirmPasswordController.clear();
-      }
-      _familyCurrentPasswordController.clear();
-      await _fetchProfile();
-      await _loadFamilyMembers();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _familyUpdateError = _friendlyError(e);
-        _familyUpdateSuccess = null;
-      });
-    } finally {
-      if (mounted) setState(() => _updatingFamily = false);
+      _showSnack(_friendlyErrorMessage(e));
     }
   }
 
@@ -321,7 +221,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _showSnack('Invite declined.');
       }
     } catch (e) {
-      _showSnack(_friendlyError(e));
+      _showSnack(_friendlyErrorMessage(e));
       await _loadChildInvites();
     } finally {
       if (mounted) setState(() => _respondingInvite = false);
@@ -353,7 +253,7 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _inviteError = _friendlyError(e);
+        _inviteError = _friendlyErrorMessage(e);
         _inviteSuccess = null;
       });
     } finally {
@@ -391,7 +291,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await _loadFamilyMembers();
     } catch (e) {
       if (!mounted) return;
-      _showSnack(_friendlyError(e));
+      _showSnack(_friendlyErrorMessage(e));
     } finally {
       if (mounted) setState(() => _leaveLoading = false);
     }
@@ -458,6 +358,447 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _showUsernameDialog() async {
+    final controller = TextEditingController();
+    final password = TextEditingController();
+    String? error;
+    bool busy = false;
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Change username'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'New username',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: password,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Current password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Usernames must be 1–100 characters.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final newName = controller.text.trim();
+                        final current = password.text.trim();
+                        if (newName.isEmpty) {
+                          setStateDialog(() => error = 'Enter a new username.');
+                          return;
+                        }
+                        if (newName.length > 100) {
+                          setStateDialog(() => error = 'Username must be at most 100 characters.');
+                          return;
+                        }
+                        if (current.isEmpty) {
+                          setStateDialog(() => error = 'Enter your current password.');
+                          return;
+                        }
+                        setStateDialog(() {
+                          busy = true;
+                          error = null;
+                        });
+                        final result = await _performCredentialUpdate(
+                          newUsername: newName,
+                          currentPassword: current,
+                        );
+                        if (result == null) {
+                          if (mounted) _showSnack('Username updated.');
+                          if (context.mounted) Navigator.pop(context);
+                        } else {
+                          setStateDialog(() {
+                            busy = false;
+                            error = result;
+                          });
+                        }
+                      },
+                child: busy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showPasswordDialog() async {
+    final newPass = TextEditingController();
+    final confirm = TextEditingController();
+    final current = TextEditingController();
+    String? error;
+    bool busy = false;
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Change password'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: newPass,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'New password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirm,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm new password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: current,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Current password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Passwords must be 8–20 characters.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final newPassword = newPass.text;
+                        final confirmPassword = confirm.text;
+                        final currentPassword = current.text.trim();
+                        if (newPassword.length < 8 || newPassword.length > 20) {
+                          setStateDialog(() => error = 'Password must be 8–20 characters.');
+                          return;
+                        }
+                        if (newPassword != confirmPassword) {
+                          setStateDialog(() => error = 'Passwords do not match.');
+                          return;
+                        }
+                        if (currentPassword.isEmpty) {
+                          setStateDialog(() => error = 'Enter your current password.');
+                          return;
+                        }
+                        setStateDialog(() {
+                          busy = true;
+                          error = null;
+                        });
+                        final result = await _performCredentialUpdate(
+                          newPassword: newPassword,
+                          confirmPassword: confirmPassword,
+                          currentPassword: currentPassword,
+                        );
+                        if (result == null) {
+                          if (mounted) _showSnack('Password updated.');
+                          if (context.mounted) Navigator.pop(context);
+                        } else {
+                          setStateDialog(() {
+                            busy = false;
+                            error = result;
+                          });
+                        }
+                      },
+                child: busy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showFamilyNameDialog() async {
+    if (!(_familyMembers?.isMaster ?? false)) return;
+    final controller = TextEditingController(text: _familyName ?? '');
+    final password = TextEditingController();
+    String? error;
+    bool busy = false;
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Rename family'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'New family name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: password,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Current family password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Family names can be up to 16 characters.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final newName = controller.text.trim();
+                        final currentPassword = password.text.trim();
+                        if (newName.isEmpty) {
+                          setStateDialog(() => error = 'Enter a family name.');
+                          return;
+                        }
+                        if (newName.length > 16) {
+                          setStateDialog(() => error = 'Family name must be 16 characters or fewer.');
+                          return;
+                        }
+                        if (currentPassword.isEmpty) {
+                          setStateDialog(() => error = 'Enter the current family password.');
+                          return;
+                        }
+                        setStateDialog(() {
+                          busy = true;
+                          error = null;
+                        });
+                        final result = await _performFamilyUpdate(
+                          newName: newName,
+                          currentPassword: currentPassword,
+                        );
+                        if (result == null) {
+                          await _fetchProfile();
+                          if (mounted) _showSnack('Family name updated.');
+                          if (context.mounted) Navigator.pop(context);
+                        } else {
+                          setStateDialog(() {
+                            busy = false;
+                            error = result;
+                          });
+                        }
+                      },
+                child: busy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showFamilyPasswordDialog() async {
+    if (!(_familyMembers?.isMaster ?? false)) return;
+    final newPass = TextEditingController();
+    final confirm = TextEditingController();
+    final current = TextEditingController();
+    String? error;
+    bool busy = false;
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Change family password'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: newPass,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'New family password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirm,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm new family password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: current,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Current family password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final newPassword = newPass.text;
+                        final confirmPassword = confirm.text;
+                        final currentPassword = current.text.trim();
+                        if (newPassword.length < 8 || newPassword.length > 20) {
+                          setStateDialog(() => error = 'Password must be 8–20 characters.');
+                          return;
+                        }
+                        if (newPassword != confirmPassword) {
+                          setStateDialog(() => error = 'Passwords do not match.');
+                          return;
+                        }
+                        if (currentPassword.isEmpty) {
+                          setStateDialog(() => error = 'Enter the current family password.');
+                          return;
+                        }
+                        setStateDialog(() {
+                          busy = true;
+                          error = null;
+                        });
+                        final result = await _performFamilyUpdate(
+                          newPassword: newPassword,
+                          confirmPassword: confirmPassword,
+                          currentPassword: currentPassword,
+                        );
+                        if (result == null) {
+                          await _fetchProfile();
+                          if (mounted) _showSnack('Family password updated.');
+                          if (context.mounted) Navigator.pop(context);
+                        } else {
+                          setStateDialog(() {
+                            busy = false;
+                            error = result;
+                          });
+                        }
+                      },
+                child: busy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<String?> _performCredentialUpdate({
+    String? newUsername,
+    String? newPassword,
+    String? confirmPassword,
+    required String currentPassword,
+  }) async {
+    setState(() => _updatingCredentials = true);
+    try {
+      final response = await AccountService.updateCredentials(
+        currentPassword: currentPassword,
+        newUsername: (newUsername?.trim().isEmpty ?? true) ? null : newUsername!.trim(),
+        newPassword: (newPassword?.isEmpty ?? true) ? null : newPassword,
+        confirmPassword: (confirmPassword?.isEmpty ?? true) ? null : confirmPassword,
+      );
+      if (!mounted) return 'Operation cancelled.';
+      if (response.token != null) {
+        AppGlobals.token = response.token!;
+      }
+      if (response.username != null) {
+        setState(() => _username = response.username!);
+      }
+      return null;
+    } catch (e) {
+      return _friendlyErrorMessage(e);
+    } finally {
+      if (mounted) setState(() => _updatingCredentials = false);
+    }
+  }
+
+  Future<String?> _performFamilyUpdate({
+    String? newName,
+    String? newPassword,
+    String? confirmPassword,
+    required String currentPassword,
+  }) async {
+    try {
+      final message = await FamilyService.updateFamily(
+        newName: (newName?.trim().isEmpty ?? true) ? null : newName!.trim(),
+        newPassword: (newPassword?.isEmpty ?? true) ? null : newPassword,
+        currentPassword: currentPassword,
+      );
+      if (!mounted) return 'Operation cancelled.';
+      if (message.isNotEmpty) {
+        await _fetchProfile();
+        await _loadFamilyMembers();
+      }
+      return null;
+    } catch (e) {
+      return _friendlyErrorMessage(e);
+    }
+  }
+
   Future<void> _updateTheme(ThemePreference pref) async {
     setState(() => _themePreference = pref);
     ThemeController.instance.applyPreference(pref);
@@ -466,87 +807,6 @@ class _ProfilePageState extends State<ProfilePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not save theme preference.')),
       );
-    }
-  }
-
-  Future<void> _submitCredentialChanges() async {
-    final newUsername = _newUsernameController.text.trim();
-    final newPassword = _newPasswordController.text;
-    final confirm = _confirmPasswordController.text;
-    final current = _currentPasswordController.text.trim();
-
-    if (newUsername.isEmpty && newPassword.isEmpty) {
-      setState(() {
-        _accountError = 'Enter a new username and/or password.';
-        _accountSuccess = null;
-      });
-      return;
-    }
-    if (current.isEmpty) {
-      setState(() {
-        _accountError = 'Enter your current password to confirm changes.';
-        _accountSuccess = null;
-      });
-      return;
-    }
-    if (newPassword.isNotEmpty && (newPassword.length < 8 || newPassword.length > 20)) {
-      setState(() {
-        _accountError = 'New password must be 8–20 characters.';
-        _accountSuccess = null;
-      });
-      return;
-    }
-    if (newPassword.isNotEmpty && newPassword != confirm) {
-      setState(() {
-        _accountError = 'New passwords do not match.';
-        _accountSuccess = null;
-      });
-      return;
-    }
-
-    setState(() {
-      _accountError = null;
-      _accountSuccess = null;
-      _updatingCredentials = true;
-    });
-
-    try {
-      final response = await AccountService.updateCredentials(
-        currentPassword: current,
-        newUsername: newUsername.isEmpty ? null : newUsername,
-        newPassword: newPassword.isEmpty ? null : newPassword,
-        confirmPassword: newPassword.isEmpty ? null : confirm,
-      );
-      if (!mounted) return;
-      if (response.token != null) {
-        AppGlobals.token = response.token!;
-      }
-      setState(() {
-        if (response.username != null) {
-          _username = response.username!;
-        }
-        _accountSuccess = 'Account details updated.';
-        _accountError = null;
-      });
-      _currentPasswordController.clear();
-      if (newUsername.isNotEmpty) {
-        _newUsernameController.clear();
-      }
-      if (newPassword.isNotEmpty) {
-        _newPasswordController.clear();
-        _confirmPasswordController.clear();
-      }
-      _showSnack('Account updated.');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _accountError = _friendlyError(e);
-        _accountSuccess = null;
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _updatingCredentials = false);
-      }
     }
   }
 
@@ -615,7 +875,7 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _googleError = _friendlyError(e);
+        _googleError = _friendlyErrorMessage(e);
         _googleSuccess = null;
       });
     } finally {
@@ -640,11 +900,6 @@ class _ProfilePageState extends State<ProfilePage> {
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  String _friendlyError(Object error) {
-    final text = error.toString();
-    return text.startsWith('Exception: ') ? text.substring('Exception: '.length) : text;
   }
 
   Future<void> _fetchProfile() async {
@@ -715,7 +970,6 @@ class _ProfilePageState extends State<ProfilePage> {
       _email = emailRaw.isEmpty ? null : emailRaw;
       _authProvider = providerRaw.isEmpty ? 'password' : providerRaw;
       _familyName = famName;
-      _familyNameController.text = famName ?? '';
       _familyIdentifier = famId;
       _loading = false;
       _error = null;
@@ -739,117 +993,119 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await _fetchProfile();
-          await _loadPreferences();
-          await _loadFamilyMembers();
-          await _loadChildInvites();
-        },
-        child: ListView(
-          children: [
-            if (_error != null)
-              _errorTile(context, _error!),
-
-            ListTile(
-              leading: const Icon(Icons.person_outline),
-              title: const Text('Profile'),
-              subtitle: Text(_buildProfileSubtitle(isParent)),
-              isThreeLine: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            ),
-            const Divider(height: 0),
-            if (_familyIdentifier != null && _role == 'parent') ...[
-              _familyManagementCard(),
-              if (_familyMembers?.isMaster ?? false) _familySettingsCard(),
-              const Divider(height: 0),
-            ],
-            ListTile(
-              leading: const Icon(Icons.light_mode_outlined),
-              title: const Text('Theme'),
-              subtitle: Text(_prefsLoading ? 'Loading...' : _themeSubtitle()),
-              trailing: DropdownButton<ThemePreference>(
-                value: _themePreference,
-                onChanged: _prefsLoading ? null : (value) {
-                  if (value != null) _updateTheme(value);
-                },
-                items: ThemePreference.values
-                    .map(
-                      (pref) => DropdownMenuItem(
-                        value: pref,
-                        child: Text(_preferenceLabel(pref)),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final horizontalPadding = _horizontalPadding(constraints.maxWidth);
+          return RefreshIndicator(
+            onRefresh: () async {
+              await _fetchProfile();
+              await _loadPreferences();
+              await _loadFamilyMembers();
+              await _loadChildInvites();
+            },
+            child: ListView(
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 12),
+              children: [
+                if (_error != null)
+                  _errorTile(context, _error!),
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  child: ListTile(
+                    leading: const Icon(Icons.person_outline),
+                    title: const Text('Profile'),
+                    subtitle: Text(_buildProfileSubtitle(isParent)),
+                    isThreeLine: true,
+                  ),
+                ),
+                if (_familyIdentifier != null && _role == 'parent') ...[
+                  _familyManagementCard(),
+                  if (_familyMembers?.isMaster ?? false) _familySettingsCard(),
+                ],
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  child: ListTile(
+                    leading: const Icon(Icons.light_mode_outlined),
+                    title: const Text('Theme'),
+                    subtitle: Text(_prefsLoading ? 'Loading...' : _themeSubtitle()),
+                    trailing: DropdownButton<ThemePreference>(
+                      value: _themePreference,
+                      onChanged: _prefsLoading ? null : (value) {
+                        if (value != null) _updateTheme(value);
+                      },
+                      items: ThemePreference.values
+                          .map(
+                            (pref) => DropdownMenuItem(
+                              value: pref,
+                              child: Text(_preferenceLabel(pref)),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ),
+                if (_prefsError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      _prefsError!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                    ),
+                  ),
+                if (_role == 'child') _childInvitesCard(),
+                if (inFamily) _leaveFamilyTile(),
+                _accountSettingsCard(),
+                if (_authProvider == 'google') _googleAccountCard(),
+                if (isParent)
+                  Card(
+                    margin: const EdgeInsets.symmetric(vertical: 12),
+                    child: ListTile(
+                      leading: const Icon(Icons.family_restroom_outlined),
+                      title: const Text('Create Family'),
+                      subtitle: Text(
+                        inFamily
+                            ? 'Leave your current family before creating a new one.'
+                            : 'Start a new family group',
                       ),
-                    )
-                    .toList(),
-              ),
-            ),
-            if (_prefsError != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Text(
-                  _prefsError!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                      onTap: inFamily
+                          ? () => _showSnack('Leave your current family before creating a new one.')
+                          : () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const CreateFamilyPage()),
+                              ).then((value) {
+                                _fetchProfile();
+                                _loadPreferences();
+                                if (_role == 'parent') {
+                                  _loadFamilyMembers();
+                                }
+                              }),
+                    ),
+                  ),
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  child: ListTile(
+                    leading: const Icon(Icons.group_add_outlined),
+                    title: const Text('Join Family'),
+                    subtitle: Text(
+                      inFamily
+                          ? 'Leave your current family before joining another.'
+                          : 'Enter a family identifier to join',
+                    ),
+                    onTap: inFamily
+                        ? () => _showSnack('Leave your current family before joining another.')
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const JoinFamilyPage()),
+                            ).then((value) {
+                              _fetchProfile();
+                              _loadPreferences();
+                              if (_role == 'parent') {
+                                _loadFamilyMembers();
+                              }
+                            }),
+                  ),
                 ),
-              ),
-            const Divider(height: 0),
-            if (_role == 'child') ...[
-              _childInvitesCard(),
-              const Divider(height: 0),
-            ],
-            if (inFamily) _leaveFamilyTile(),
-            if (inFamily) const Divider(height: 0),
-            _accountSettingsCard(),
-            const Divider(height: 0),
-            if (_authProvider == 'google') ...[
-              _googleAccountCard(),
-              const Divider(height: 0),
-            ],
-
-            if (isParent) ...[
-              ListTile(
-                leading: const Icon(Icons.family_restroom_outlined),
-                title: const Text('Create Family'),
-                subtitle: Text(
-                  inFamily
-                      ? 'Leave your current family before creating a new one.'
-                      : 'Start a new family group',
-                ),
-                onTap: inFamily
-                    ? () => _showSnack('Leave your current family before creating a new one.')
-                    : () => Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const CreateFamilyPage()),
-                        ).then((value) {
-                          _fetchProfile();
-                          _loadPreferences();
-                          if (_role == 'parent') {
-                            _loadFamilyMembers();
-                          }
-                        }),
-              ),
-              const Divider(height: 0),
-            ],
-            ListTile(
-              leading: const Icon(Icons.group_add_outlined),
-              title: const Text('Join Family'),
-              subtitle: Text(
-                inFamily
-                    ? 'Leave your current family before joining another.'
-                    : 'Enter a family identifier to join',
-              ),
-              onTap: inFamily
-                  ? () => _showSnack('Leave your current family before joining another.')
-                  : () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const JoinFamilyPage()),
-                      ).then((value) {
-                        _fetchProfile();
-                        _loadPreferences();
-                        if (_role == 'parent') {
-                          _loadFamilyMembers();
-                        }
-                      }),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -870,7 +1126,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _errorTile(BuildContext context, String msg) {
     return Container(
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.35),
@@ -907,89 +1163,30 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _accountSettingsCard() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    final isGoogle = (_authProvider == 'google');
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Account Settings', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _newUsernameController,
-            decoration: const InputDecoration(
-              labelText: 'New username',
-              border: OutlineInputBorder(),
-            ),
+          ListTile(
+            leading: const Icon(Icons.contact_page_outlined),
+            title: const Text('Change username'),
+            subtitle: Text('Current: $_username'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _showUsernameDialog,
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _newPasswordController,
-            obscureText: !_showNewPassword,
-            decoration: InputDecoration(
-              labelText: 'New password',
-              helperText: 'Leave blank to keep your current password.',
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                onPressed: () => setState(() => _showNewPassword = !_showNewPassword),
-                icon: Icon(_showNewPassword ? Icons.visibility : Icons.visibility_off),
-              ),
-            ),
+          const Divider(height: 0),
+          ListTile(
+            leading: const Icon(Icons.lock_reset),
+            title: const Text('Change password'),
+            subtitle: Text(isGoogle
+                ? 'Google-linked accounts can’t change the password from here.'
+                : 'Update your account password'),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: !isGoogle,
+            onTap: isGoogle ? null : _showPasswordDialog,
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _confirmPasswordController,
-            obscureText: !_showNewPassword,
-            decoration: const InputDecoration(
-              labelText: 'Confirm new password',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _currentPasswordController,
-            obscureText: !_showCurrentPassword,
-            decoration: InputDecoration(
-              labelText: 'Current password *',
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                onPressed: () => setState(() => _showCurrentPassword = !_showCurrentPassword),
-                icon: Icon(_showCurrentPassword ? Icons.visibility : Icons.visibility_off),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Provide your current password to confirm any username or password changes.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: _updatingCredentials ? null : _submitCredentialChanges,
-            icon: _updatingCredentials
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save_outlined),
-            label: Text(_updatingCredentials ? 'Saving...' : 'Save changes'),
-          ),
-          if (_accountError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _accountError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-              ),
-            ),
-          if (_accountSuccess != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _accountSuccess!,
-                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
-              ),
-            ),
         ],
       ),
     );
@@ -1001,83 +1198,89 @@ class _ProfilePageState extends State<ProfilePage> {
     final subtitle = isParent
         ? 'Leave immediately and transfer responsibilities automatically.'
         : 'Send a request to the master parent to leave.';
-    return ListTile(
-      leading: Icon(isParent ? Icons.logout : Icons.outbox),
-      title: Text(title),
-      subtitle: Text(subtitle),
-      trailing: _leaveLoading
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : null,
-      onTap: _leaveLoading ? null : _confirmLeaveFamily,
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: ListTile(
+        leading: Icon(isParent ? Icons.logout : Icons.outbox),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: _leaveLoading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : null,
+        onTap: _leaveLoading ? null : _confirmLeaveFamily,
+      ),
     );
   }
 
   Widget _googleAccountCard() {
     final configIssue = GoogleOAuthConfig.configurationHint();
     final disabled = configIssue != null || _switchingGoogle;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Google Account', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          Text('Currently linked: ${_email ?? 'Unknown'}'),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _googlePasswordController,
-            obscureText: !_showGooglePassword,
-            decoration: InputDecoration(
-              labelText: 'Password *',
-              helperText: 'Confirm with your password before switching Google accounts.',
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                onPressed: () => setState(() => _showGooglePassword = !_showGooglePassword),
-                icon: Icon(_showGooglePassword ? Icons.visibility : Icons.visibility_off),
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Google Account', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text('Currently linked: ${_email ?? 'Unknown'}'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _googlePasswordController,
+              obscureText: !_showGooglePassword,
+              decoration: InputDecoration(
+                labelText: 'Password *',
+                helperText: 'Confirm with your password before switching Google accounts.',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  onPressed: () => setState(() => _showGooglePassword = !_showGooglePassword),
+                  icon: Icon(_showGooglePassword ? Icons.visibility : Icons.visibility_off),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: disabled ? null : _switchGoogleAccount,
-            icon: _switchingGoogle
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.swap_horiz),
-            label: Text(_switchingGoogle ? 'Switching...' : 'Switch Google account'),
-          ),
-          if (configIssue != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'Google sign-in unavailable: $configIssue',
-                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-              ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: disabled ? null : _switchGoogleAccount,
+              icon: _switchingGoogle
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.swap_horiz),
+              label: Text(_switchingGoogle ? 'Switching...' : 'Switch Google account'),
             ),
-          if (_googleError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _googleError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+            if (configIssue != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Google sign-in unavailable: $configIssue',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                ),
               ),
-            ),
-          if (_googleSuccess != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _googleSuccess!,
-                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+            if (_googleError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _googleError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                ),
               ),
-            ),
-        ],
+            if (_googleSuccess != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _googleSuccess!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1085,234 +1288,208 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _familyManagementCard() {
     final members = _familyMembers;
     final isMaster = members?.isMaster ?? false;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ListTile(
-          leading: const Icon(Icons.family_restroom_outlined),
-          title: const Text('Family Members'),
-          subtitle: Text(_membersLoading
-              ? 'Loading members...'
-              : members == null
-                  ? 'No data available'
-                  : _familyMembersSubtitle(members)),
-          trailing: IconButton(
-            tooltip: 'Refresh members',
-            onPressed: _membersLoading ? null : () => _loadFamilyMembers(),
-            icon: const Icon(Icons.refresh),
-          ),
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              leading: const Icon(Icons.family_restroom_outlined),
+              title: const Text('Family Members'),
+              subtitle: Text(_membersLoading
+                  ? 'Loading members...'
+                  : members == null
+                      ? 'No data available'
+                      : _familyMembersSubtitle(members)),
+              trailing: IconButton(
+                tooltip: 'Refresh members',
+                onPressed: _membersLoading ? null : () => _loadFamilyMembers(),
+                icon: const Icon(Icons.refresh),
+              ),
+            ),
+            if (_membersError != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Text(
+                  _membersError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                ),
+              ),
+            if (!_membersLoading && members != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Parents', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ...members.parents.map(
+                      (m) => _buildMemberRow(
+                        m,
+                        canTransfer: isMaster && !m.isMaster,
+                        canRemove: isMaster && !m.isMaster,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Children', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ...members.children.map(
+                      (m) => _buildMemberRow(
+                        m,
+                        canTransfer: false,
+                        canRemove: isMaster,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if ((_familyMembers?.isMaster ?? false)) _buildLeaveRequestsPanel(),
+            if (_role == 'parent') _buildFamilyInviteCard(),
+          ],
         ),
-        if (_membersError != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Text(
-              _membersError!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-            ),
-          ),
-        if (!_membersLoading && members != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Parents', style: TextStyle(fontWeight: FontWeight.w600)),
-                ...members.parents.map(
-                  (m) => _memberRow(
-                    m,
-                    canTransfer: isMaster && !m.isMaster,
-                    canRemove: isMaster && !m.isMaster,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text('Children', style: TextStyle(fontWeight: FontWeight.w600)),
-                ...members.children.map(
-                  (m) => _memberRow(
-                    m,
-                    canTransfer: false,
-                    canRemove: isMaster,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        if ((_familyMembers?.isMaster ?? false)) _leaveRequestsPanel(),
-        if (_role == 'parent') _familyInviteSection(),
-      ],
-    );
-  }
-
-  Widget _familySettingsCard() {
-    final currentName = _familyName ?? '—';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Family Settings', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _familyNameController,
-            decoration: InputDecoration(
-              labelText: 'New family name',
-              helperText: 'Current name: $currentName',
-              border: const OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _familyNewPasswordController,
-            obscureText: !_showFamilyNewPassword,
-            decoration: InputDecoration(
-              labelText: 'New family password',
-              helperText: 'Leave blank to keep the existing password.',
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: Icon(_showFamilyNewPassword ? Icons.visibility : Icons.visibility_off),
-                onPressed: () => setState(() => _showFamilyNewPassword = !_showFamilyNewPassword),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _familyConfirmPasswordController,
-            obscureText: !_showFamilyNewPassword,
-            decoration: const InputDecoration(
-              labelText: 'Confirm new family password',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _familyCurrentPasswordController,
-            obscureText: !_showFamilyCurrentPassword,
-            decoration: InputDecoration(
-              labelText: 'Current family password *',
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: Icon(_showFamilyCurrentPassword ? Icons.visibility : Icons.visibility_off),
-                onPressed: () => setState(() => _showFamilyCurrentPassword = !_showFamilyCurrentPassword),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: _updatingFamily ? null : _updateFamilySettings,
-            icon: _updatingFamily
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.save),
-            label: Text(_updatingFamily ? 'Saving...' : 'Save family changes'),
-          ),
-          if (_familyUpdateError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _familyUpdateError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-              ),
-            ),
-          if (_familyUpdateSuccess != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _familyUpdateSuccess!,
-                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
-              ),
-            ),
-        ],
       ),
     );
   }
 
-  Widget _familyInviteSection() {
-    if (_role != 'parent' || _familyIdentifier == null) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  Widget _familySettingsCard() {
+    final isMaster = _familyMembers?.isMaster ?? false;
+    final currentName = _familyName ?? 'Not set';
+    final familyId = _familyIdentifier ?? 'Unknown';
+    if (!isMaster) {
+      return Card(
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        child: ListTile(
+          leading: const Icon(Icons.info_outline),
+          title: const Text('Family settings'),
+          subtitle: Text('Only the master parent can update this family.\nID: $familyId'),
+        ),
+      );
+    }
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Invite a Child', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _inviteChildController,
-            decoration: const InputDecoration(
-              labelText: 'Child username',
-              border: OutlineInputBorder(),
+          ListTile(
+            leading: const Icon(Icons.family_restroom_outlined),
+            title: const Text('Family name'),
+            subtitle: Text('Current: $currentName\nID: $familyId'),
+            trailing: FilledButton.icon(
+              onPressed: _showFamilyNameDialog,
+              icon: const Icon(Icons.edit),
+              label: const Text('Rename'),
             ),
           ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: _sendingInvite ? null : _sendChildInvite,
-            icon: _sendingInvite
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.send),
-            label: Text(_sendingInvite ? 'Sending...' : 'Send invite'),
+          const Divider(height: 0),
+          ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: const Text('Family password'),
+            subtitle: const Text('Protects who can join this family'),
+            trailing: FilledButton.icon(
+              onPressed: _showFamilyPasswordDialog,
+              icon: const Icon(Icons.lock_reset),
+              label: const Text('Change'),
+            ),
           ),
-          if (_inviteError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                _inviteError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-              ),
-            ),
-          if (_inviteSuccess != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                _inviteSuccess!,
-                style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
-              ),
-            ),
         ],
+      ),
+    );
+  }
+  Widget _buildFamilyInviteCard() {
+    if (_role != 'parent' || _familyIdentifier == null) return const SizedBox.shrink();
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Invite a Child', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _inviteChildController,
+              decoration: const InputDecoration(
+                labelText: 'Child username',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _sendingInvite ? null : _sendChildInvite,
+              icon: _sendingInvite
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.send),
+              label: Text(_sendingInvite ? 'Sending...' : 'Send invite'),
+            ),
+            if (_inviteError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  _inviteError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                ),
+              ),
+            if (_inviteSuccess != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  _inviteSuccess!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _childInvitesCard() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Family Invitations', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          if (_childInvitesLoading)
-            const LinearProgressIndicator()
-          else if (_childInvitesError != null)
-            Text(
-              _childInvitesError!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-            )
-          else if (_childInvites.isEmpty)
-            const Text('No invitations right now.'),
-          if (!_childInvitesLoading && _childInvites.isNotEmpty)
-            ..._childInvites.map(
-              (invite) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  "You're invited to join the \"${invite.familyName}\" family",
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Text('Family ID: ${invite.familyId}'),
-                trailing: Wrap(
-                  spacing: 4,
-                  children: [
-                    IconButton(
-                      tooltip: 'Accept invite',
-                      icon: const Icon(Icons.check_circle, color: Colors.green),
-                      onPressed: _respondingInvite ? null : () => _respondToInvite(invite, true),
-                    ),
-                    IconButton(
-                      tooltip: 'Decline invite',
-                      icon: const Icon(Icons.cancel, color: Colors.redAccent),
-                      onPressed: _respondingInvite ? null : () => _respondToInvite(invite, false),
-                    ),
-                  ],
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Family Invitations', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            if (_childInvitesLoading)
+              const LinearProgressIndicator()
+            else if (_childInvitesError != null)
+              Text(
+                _childInvitesError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+              )
+            else if (_childInvites.isEmpty)
+              const Text('No invitations right now.'),
+            if (!_childInvitesLoading && _childInvites.isNotEmpty)
+              ..._childInvites.map(
+                (invite) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    "You're invited to join the \"${invite.familyName}\" family",
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text('Family ID: ${invite.familyId}'),
+                  trailing: Wrap(
+                    spacing: 4,
+                    children: [
+                      IconButton(
+                        tooltip: 'Accept invite',
+                        icon: const Icon(Icons.check_circle, color: Colors.green),
+                        onPressed: _respondingInvite ? null : () => _respondToInvite(invite, true),
+                      ),
+                      IconButton(
+                        tooltip: 'Decline invite',
+                        icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                        onPressed: _respondingInvite ? null : () => _respondToInvite(invite, false),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1325,7 +1502,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return base;
   }
 
-  Widget _leaveRequestsPanel() {
+  Widget _buildLeaveRequestsPanel() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
@@ -1353,7 +1530,7 @@ class _ProfilePageState extends State<ProfilePage> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.child_care_outlined),
               title: Text(req.displayName),
-              subtitle: Text('${_formatRequestTime(req)}\n@${req.childUsername}'),
+              subtitle: Text('${_formatLeaveRequestTime(req)}\n@${req.childUsername}'),
               trailing: Wrap(
                 spacing: 4,
                 children: [
@@ -1376,7 +1553,7 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  String _formatRequestTime(LeaveRequestInfo req) {
+  String _formatLeaveRequestTime(LeaveRequestInfo req) {
     final label = req.childLocalTime?.trim();
     if (label != null && label.isNotEmpty) {
       return 'Requested $label';
@@ -1412,7 +1589,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return '$monthName $day, $year $hour12:$minute $period (UTC$sign$offsetHours:$offsetMinutes)';
   }
 
-  Widget _memberRow(FamilyMember member, {required bool canTransfer, required bool canRemove}) {
+  Widget _buildMemberRow(FamilyMember member, {required bool canTransfer, required bool canRemove}) {
     final showTransfer = canTransfer && !member.isMaster;
     final showRemove = canRemove && (!member.isMaster || !canTransfer);
     return ListTile(
@@ -1440,5 +1617,12 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
+  }
+
+  double _horizontalPadding(double maxWidth) {
+    const maxContentWidth = 640.0;
+    if (!maxWidth.isFinite) return 16;
+    final side = (maxWidth - maxContentWidth) / 2;
+    return math.max(16, side);
   }
 }

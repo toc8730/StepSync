@@ -64,7 +64,7 @@ class FamilyService {
     final list = body['requests'];
     if (list is List) {
       return list
-          .where((item) => item is Map)
+          .whereType<Map>()
           .map((item) => LeaveRequestInfo.fromJson(Map<String, dynamic>.from(item as Map)))
           .toList();
     }
@@ -141,7 +141,7 @@ class FamilyService {
     final list = body['invites'];
     if (list is List) {
       return list
-          .where((item) => item is Map)
+          .whereType<Map>()
           .map((item) => FamilyInviteInfo.fromJson(Map<String, dynamic>.from(item as Map)))
           .toList();
     }
@@ -192,7 +192,7 @@ class FamilyMembers {
   factory FamilyMembers.fromJson(Map<String, dynamic> json) {
     List<FamilyMember> parseMembers(List list, {bool parents = false}) {
       return list
-          .where((element) => element is Map)
+          .whereType<Map>()
           .map((element) => Map<String, dynamic>.from(element as Map))
           .map((m) => FamilyMember(
                 username: (m['username'] ?? '').toString(),

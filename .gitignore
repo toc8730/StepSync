@@ -45,7 +45,7 @@ app.*.map.json
 /android/app/release
 
 #server instance files
-/flask/instance
+/backend/instance
 
 # Local dart defines (OAuth client IDs, etc.)
 dart_defines.json
