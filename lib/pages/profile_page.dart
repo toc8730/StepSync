@@ -818,7 +818,13 @@ class _ProfilePageState extends State<ProfilePage> {
                     ? () => _showSnack('Leave your current family before creating a new one.')
                     : () => Navigator.of(context).push(
                           MaterialPageRoute(builder: (_) => const CreateFamilyPage()),
-                        ),
+                        ).then((value) {
+                          _fetchProfile();
+                          _loadPreferences();
+                          if (_role == 'parent') {
+                            _loadFamilyMembers();
+                          }
+                        }),
               ),
               const Divider(height: 0),
             ],
@@ -834,7 +840,13 @@ class _ProfilePageState extends State<ProfilePage> {
                   ? () => _showSnack('Leave your current family before joining another.')
                   : () => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => const JoinFamilyPage()),
-                      ),
+                      ).then((value) {
+                        _fetchProfile();
+                        _loadPreferences();
+                        if (_role == 'parent') {
+                          _loadFamilyMembers();
+                        }
+                      }),
             ),
           ],
         ),
