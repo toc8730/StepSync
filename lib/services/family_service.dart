@@ -38,13 +38,20 @@ class FamilyService {
     return res.statusCode == 200;
   }
 
-  static Future<String> leaveFamily() async {
-    final res = await http.post(Uri.parse('$_baseUrl/family/leave'), headers: _headers());
-    final body = _decodeBody(res.body);
+  static Future<String> leaveFamily({String? requestedLocalLabel}) async {
+    final requestBody = requestedLocalLabel == null
+        ? null
+        : json.encode({'requested_local_label': requestedLocalLabel});
+    final res = await http.post(
+      Uri.parse('$_baseUrl/family/leave'),
+      headers: _headers(),
+      body: requestBody,
+    );
+    final responseBody = _decodeBody(res.body);
     if (res.statusCode == 200) {
-      return (body['message'] ?? 'Request submitted.').toString();
+      return (responseBody['message'] ?? 'Request submitted.').toString();
     }
-    throw Exception(body['error'] ?? 'Unable to leave the family.');
+    throw Exception(responseBody['error'] ?? 'Unable to leave the family.');
   }
 
   static Future<List<LeaveRequestInfo>> fetchLeaveRequests() async {
@@ -217,11 +224,17 @@ class FamilyMembers {
 }
 
 class LeaveRequestInfo {
-  LeaveRequestInfo({required this.childUsername, required this.displayName, this.requestedAt});
+  LeaveRequestInfo({
+    required this.childUsername,
+    required this.displayName,
+    this.requestedAt,
+    this.childLocalTime,
+  });
 
   final String childUsername;
   final String displayName;
   final DateTime? requestedAt;
+  final String? childLocalTime;
 
   factory LeaveRequestInfo.fromJson(Map<String, dynamic> json) {
     DateTime? parsed;
@@ -233,6 +246,9 @@ class LeaveRequestInfo {
       childUsername: (json['child_username'] ?? '').toString(),
       displayName: FamilyMembers._cleanName(json['display_name'], fallback: json['child_username']),
       requestedAt: parsed,
+      childLocalTime: (json['child_local_time'] ?? '').toString().trim().isEmpty
+          ? null
+          : json['child_local_time'].toString(),
     );
   }
 }

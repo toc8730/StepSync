@@ -78,6 +78,7 @@ class FamilyLeaveRequest(db.Model):
     child_username = db.Column(db.String(100), nullable=False)
     status         = db.Column(db.String(20), nullable=False, default="pending")  # pending | resolved
     created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    child_local_time = db.Column(db.String(80), nullable=True)
 
 class FamilyInvite(db.Model):
     __tablename__ = "family_invites"
@@ -112,6 +113,10 @@ with app.app_context():
     existing_tables = set(_insp.get_table_names())
     if "family_invites" not in existing_tables:
         FamilyInvite.__table__.create(db.engine, checkfirst=True)
+    leave_columns = {col["name"] for col in _insp.get_columns("family_leave_requests")}
+    if "child_local_time" not in leave_columns:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE family_leave_requests ADD COLUMN child_local_time TEXT"))
 
 # -------------------- Helpers --------------------
 def _default_preferences() -> dict:
@@ -1514,6 +1519,9 @@ def family_leave():
     if not family:
         return jsonify({"error": "You are not currently in a family."}), 400
 
+    payload = request.get_json(silent=True) or {}
+    requested_local_label = (payload.get("requested_local_time") or payload.get("requested_local_label") or "").strip()
+
     if user.account_type.lower() == "child":
         existing = FamilyLeaveRequest.query.filter_by(
             family_id=family.family_id,
@@ -1522,7 +1530,11 @@ def family_leave():
         ).first()
         if existing:
             return jsonify({"message": "A leave request is already pending approval."}), 200
-        req = FamilyLeaveRequest(family_id=family.family_id, child_username=user.username)
+        req = FamilyLeaveRequest(
+            family_id=family.family_id,
+            child_username=user.username,
+            child_local_time=requested_local_label or None,
+        )
         db.session.add(req)
         db.session.commit()
         return jsonify({"message": "Leave request sent to the master parent."}), 200
@@ -1554,6 +1566,7 @@ def family_leave_requests():
             "child_username": item.child_username,
             "display_name": _user_display_name(child),
             "requested_at": item.created_at.isoformat() if item.created_at else None,
+            "child_local_time": item.child_local_time,
         })
     return jsonify({"requests": results}), 200
 

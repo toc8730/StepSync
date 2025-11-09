@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
+import 'package:my_app/services/family_service.dart';
 import '../task_controller.dart';
 import '../models/task.dart';
 import '../widgets/task_tile.dart';
@@ -24,12 +25,16 @@ class ChildHomePage extends StatefulWidget {
 class _ChildHomePageState extends State<ChildHomePage> {
   late final TaskController _ctrl;
   static const _base = BackendConfig.baseUrl;
+  List<FamilyInviteInfo> _pendingInvites = const [];
+  bool _invitesLoading = false;
+  String? _invitesError;
 
   @override
   void initState() {
     super.initState();
     _ctrl = TaskController();
     _loadFromServer();
+    _loadInvites();
   }
 
   Map<String, String> get _jsonHeaders => {
@@ -68,6 +73,27 @@ class _ChildHomePageState extends State<ChildHomePage> {
     }
   }
 
+  Future<void> _loadInvites() async {
+    setState(() {
+      _invitesLoading = true;
+      _invitesError = null;
+    });
+    try {
+      final invites = await FamilyService.fetchChildInvites();
+      if (!mounted) return;
+      setState(() {
+        _pendingInvites = invites;
+        _invitesLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _invitesError = 'Failed to load invites: $e';
+        _invitesLoading = false;
+      });
+    }
+  }
+
   // (Optional) persist toggle as an edit
   Future<void> _persistToggle(Task before, Task after) async {
     try {
@@ -98,6 +124,8 @@ class _ChildHomePageState extends State<ChildHomePage> {
       case 'profile':
         if (!mounted) return;
         await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfilePage()));
+        if (!mounted) return;
+        _loadInvites();
         break;
       case 'signout':
         if (!mounted) return;
@@ -140,9 +168,26 @@ class _ChildHomePageState extends State<ChildHomePage> {
           ),
         ],
       ),
-      body: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (_, __) => _ChildTasksSectionViewOnly(ctrl: _ctrl, onTogglePersist: _persistToggle),
+      body: Column(
+        children: [
+          if (_pendingInvites.isNotEmpty) _inviteBanner(),
+          if (_invitesError != null && _pendingInvites.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.4),
+              child: Text(
+                _invitesError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          Expanded(
+            child: AnimatedBuilder(
+              animation: _ctrl,
+              builder: (_, __) => _ChildTasksSectionViewOnly(ctrl: _ctrl, onTogglePersist: _persistToggle),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -153,6 +198,41 @@ class _ChildHomePageState extends State<ChildHomePage> {
         content: Text(msg),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(milliseconds: 1400),
+      ),
+    );
+  }
+
+  Widget _inviteBanner() {
+    final invite = _pendingInvites.first;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.tertiaryContainer.withOpacity(0.9),
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "You're invited to join \"${invite.familyName}\" (ID: ${invite.familyId}).",
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                const Text('Review from your profile page to accept or decline.'),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => _handleMenuSelect('profile'),
+            child: const Text('Review'),
+          ),
+        ],
       ),
     );
   }

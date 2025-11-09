@@ -33,6 +33,7 @@ class _HomePageState extends State<HomePage> {
   List<FamilyMember> _children = const <FamilyMember>[];
   bool _childrenLoading = false;
   String? _childrenError;
+  int _pendingLeaveRequests = 0;
 
   @override
   void initState() {
@@ -191,6 +192,8 @@ class _HomePageState extends State<HomePage> {
         _children = children;
         _childrenLoading = false;
         _childrenError = members == null ? 'Unable to load family info.' : null;
+        _pendingLeaveRequests =
+            (members != null && members.isMaster) ? members.pendingRequests : 0;
         if (missingSelection || children.isEmpty) _selectedChild = null;
       });
       if (missingSelection) _loadFromServer();
@@ -199,6 +202,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _childrenLoading = false;
         _childrenError = 'Failed to load children: $e';
+        _pendingLeaveRequests = 0;
       });
     }
   }
@@ -357,6 +361,7 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         children: [
+          if (_pendingLeaveRequests > 0) _leaveRequestsBanner(),
           _assignmentBanner(),
           Expanded(
             child: AnimatedBuilder(
@@ -450,6 +455,40 @@ class _HomePageState extends State<HomePage> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
               ),
             )
+        ],
+      ),
+    );
+  }
+
+  Widget _leaveRequestsBanner() {
+    final count = _pendingLeaveRequests;
+    final text = count == 1
+        ? '1 child has requested to leave the family.'
+        : '$count children have requested to leave the family.';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.8),
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: () => _handleMenuSelect('profile'),
+            child: const Text('Review'),
+          ),
         ],
       ),
     );

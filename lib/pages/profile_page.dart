@@ -383,7 +383,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
     setState(() => _leaveLoading = true);
     try {
-      final message = await FamilyService.leaveFamily();
+      final localLabel = (_role == 'child') ? _currentLocalRequestLabel() : null;
+      final message = await FamilyService.leaveFamily(requestedLocalLabel: localLabel);
       if (!mounted) return;
       _showSnack(message);
       await _fetchProfile();
@@ -1340,7 +1341,7 @@ class _ProfilePageState extends State<ProfilePage> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.child_care_outlined),
               title: Text(req.displayName),
-              subtitle: Text('${_formatRequestTime(req.requestedAt)}\n@${req.childUsername}'),
+              subtitle: Text('${_formatRequestTime(req)}\n@${req.childUsername}'),
               trailing: Wrap(
                 spacing: 4,
                 children: [
@@ -1363,7 +1364,12 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  String _formatRequestTime(DateTime? timestamp) {
+  String _formatRequestTime(LeaveRequestInfo req) {
+    final label = req.childLocalTime?.trim();
+    if (label != null && label.isNotEmpty) {
+      return 'Requested $label';
+    }
+    final timestamp = req.requestedAt;
     if (timestamp == null) return 'Requested just now';
     final local = timestamp.toLocal();
     final month = local.month.toString().padLeft(2, '0');
@@ -1373,6 +1379,25 @@ class _ProfilePageState extends State<ProfilePage> {
     final minute = local.minute.toString().padLeft(2, '0');
     final period = local.hour >= 12 ? 'PM' : 'AM';
     return 'Requested $month/$day/$year at $hour12:$minute $period';
+  }
+
+  String _currentLocalRequestLabel() {
+    final now = DateTime.now();
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final monthName = monthNames[now.month - 1];
+    final day = now.day;
+    final year = now.year;
+    final hour12 = now.hour % 12 == 0 ? 12 : now.hour % 12;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = now.hour >= 12 ? 'PM' : 'AM';
+    final offset = now.timeZoneOffset;
+    final sign = offset.isNegative ? '-' : '+';
+    final offsetHours = offset.inHours.abs().toString().padLeft(2, '0');
+    final offsetMinutes = (offset.inMinutes.abs() % 60).toString().padLeft(2, '0');
+    return '$monthName $day, $year $hour12:$minute $period (UTC$sign$offsetHours:$offsetMinutes)';
   }
 
   Widget _memberRow(FamilyMember member, {required bool canTransfer, required bool canRemove}) {
