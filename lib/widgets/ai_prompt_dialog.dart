@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 import '../models/task.dart';
+import '../pages/routine_editor_page.dart';
 import '../services/ai_task_generator.dart';
-import 'task_editor_dialog.dart';
 
 class AiPromptDialog extends StatefulWidget {
   const AiPromptDialog({super.key});
 
-  static Future<List<Task>> showAndGenerate(BuildContext context) async {
-    final res = await showDialog<List<Task>>(
+  static Future<RoutineEditorResult?> showAndGenerate(BuildContext context) async {
+    return showDialog<RoutineEditorResult?>(
       context: context,
       barrierDismissible: true,
       builder: (_) => const AiPromptDialog(),
     );
-    return res ?? <Task>[];
   }
 
   @override
@@ -57,14 +56,15 @@ class _AiPromptDialogState extends State<AiPromptDialog> {
             setState(() { _busy = true; _err = null; });
             try {
               final generated = await AiTaskGenerator.fromPrompt(_ctrl.text);
-              // Let user tweak each generated task in your existing editor
-              final accepted = <Task>[];
-              for (final t in generated) {
-                final edited = await TaskEditorDialog.show(context, initial: t);
-                if (edited != null) accepted.add(edited);
-              }
-              if (!mounted) return;
-              Navigator.pop(context, accepted);
+              if (!context.mounted) return;
+              final result = await RoutineEditorPage.open(
+                context,
+                tasks: generated,
+                initialName: 'AI Routine',
+                showDeployButton: true,
+              );
+              if (!context.mounted) return;
+              Navigator.pop(context, result);
             } catch (e) {
               setState(() { _err = 'Failed to generate: $e'; _busy = false; });
             }

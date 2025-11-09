@@ -101,6 +101,16 @@ class TaskTemplateEntry(db.Model):
     period = db.Column(db.String(5), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+class RoutineTemplateEntry(db.Model):
+    __tablename__ = "routine_templates"
+    id = db.Column(db.String(40), primary_key=True)
+    owner_username = db.Column(db.String(100), db.ForeignKey("users.username"), nullable=False)
+    title = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    tasks_json = db.Column(db.Text, nullable=False, default="[]")
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 with app.app_context():
     db.create_all()
     _insp = inspect(db.engine)
@@ -128,6 +138,8 @@ with app.app_context():
         FamilyInvite.__table__.create(db.engine, checkfirst=True)
     if "task_templates" not in existing_tables:
         TaskTemplateEntry.__table__.create(db.engine, checkfirst=True)
+    if "routine_templates" not in existing_tables:
+        RoutineTemplateEntry.__table__.create(db.engine, checkfirst=True)
     leave_columns = {col["name"] for col in _insp.get_columns("family_leave_requests")}
     if "child_local_time" not in leave_columns:
         with db.engine.begin() as conn:
@@ -249,6 +261,78 @@ def _schedule_owner(user: 'User') -> tuple['User', bool]:
                 owner = master
                 is_master = (master.username == user.username)
     return owner, is_master
+
+def _routine_tasks_from_json(blob: str) -> list[dict]:
+    try:
+        data = json.loads(blob or "[]")
+        if isinstance(data, list):
+            return [
+                {
+                    "title": (item.get("title") or "").strip(),
+                    "steps": item.get("steps") if isinstance(item.get("steps"), list) else [],
+                    "startTime": item.get("startTime"),
+                    "endTime": item.get("endTime"),
+                    "period": item.get("period"),
+                    "hidden": bool(item.get("hidden")),
+                    "completed": bool(item.get("completed")),
+                }
+                for item in data
+                if isinstance(item, dict)
+            ]
+    except Exception:
+        pass
+    return []
+
+def _serialize_routine_entry(entry: RoutineTemplateEntry) -> dict:
+    return {
+        "id": entry.id,
+        "title": entry.title,
+        "description": entry.description or "",
+        "tasks": _routine_tasks_from_json(entry.tasks_json),
+        "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+    }
+
+def _normalize_task_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("Each task must be an object.")
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise ValueError("Task title is required.")
+    steps_raw = payload.get("steps")
+    if isinstance(steps_raw, list):
+        steps = [
+            str(step).strip()
+            for step in steps_raw
+            if str(step).strip()
+        ][:20]
+    else:
+        steps = []
+    def _clean_time(value):
+        text = (value or "").strip()
+        return text[:10] if text else None
+    start_time = _clean_time(payload.get("start") or payload.get("startTime") or payload.get("start_time"))
+    end_time = _clean_time(payload.get("end") or payload.get("endTime") or payload.get("end_time"))
+    period = (payload.get("period") or "").strip().upper()
+    if period not in ("AM", "PM"):
+        period = None
+    return {
+        "title": title,
+        "steps": steps,
+        "startTime": start_time,
+        "endTime": end_time,
+        "period": period,
+        "hidden": bool(payload.get("hidden")),
+        "completed": bool(payload.get("completed")),
+    }
+
+def _normalize_task_list(items) -> list[dict]:
+    if not isinstance(items, list) or not items:
+        raise ValueError("Provide at least one task.")
+    normalized: list[dict] = []
+    for raw in items:
+        normalized.append(_normalize_task_payload(raw))
+    return normalized
 
 def _family_children(family: 'Family') -> list['User']:
     members = User.query.filter_by(family_id=family.family_id).all()
@@ -1483,6 +1567,96 @@ def update_template(template_id: str):
 
     viewer_is_master = entry.scope == "family" and _can_manage_template(user, entry)
     return jsonify({"template": _serialize_template_entry(entry, user.username, viewer_is_master)}), 200
+
+@app.route("/routines", methods=["GET"])
+@jwt_required()
+def list_routines():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can view routines."}), 403
+
+    entries = RoutineTemplateEntry.query.filter_by(owner_username=user.username).order_by(
+        RoutineTemplateEntry.updated_at.desc()
+    ).all()
+    return jsonify({"routines": [_serialize_routine_entry(entry) for entry in entries]}), 200
+
+@app.route("/routines", methods=["POST"])
+@jwt_required()
+def create_routine():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can create routines."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Routine title is required."}), 400
+    tasks_payload = payload.get("tasks")
+    try:
+        normalized = _normalize_task_list(tasks_payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    entry = RoutineTemplateEntry(
+        id=_rand_template_id(),
+        owner_username=user.username,
+        title=title,
+        description=(payload.get("description") or "").strip(),
+        tasks_json=json.dumps(normalized),
+    )
+    db.session.add(entry)
+    db.session.commit()
+    return jsonify({"routine": _serialize_routine_entry(entry)}), 200
+
+@app.route("/routines/<routine_id>", methods=["PUT", "PATCH"])
+@jwt_required()
+def update_routine_template(routine_id: str):
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can update routines."}), 403
+
+    entry = RoutineTemplateEntry.query.filter_by(id=routine_id, owner_username=user.username).first()
+    if not entry:
+        return jsonify({"error": "Routine not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Routine title is required."}), 400
+    tasks_payload = payload.get("tasks")
+    try:
+        normalized = _normalize_task_list(tasks_payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    entry.title = title
+    entry.description = (payload.get("description") or "").strip()
+    entry.tasks_json = json.dumps(normalized)
+    db.session.commit()
+    return jsonify({"routine": _serialize_routine_entry(entry)}), 200
+
+@app.route("/routines/<routine_id>", methods=["DELETE"])
+@jwt_required()
+def delete_routine_template(routine_id: str):
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type.lower() != "parent":
+        return jsonify({"error": "Only parents can delete routines."}), 403
+
+    entry = RoutineTemplateEntry.query.filter_by(id=routine_id, owner_username=user.username).first()
+    if not entry:
+        return jsonify({"error": "Routine not found"}), 404
+
+    db.session.delete(entry)
+    db.session.commit()
+    return jsonify({"message": "Routine deleted."}), 200
 
 @app.route("/profile/preferences", methods=["GET", "POST"])
 @jwt_required()

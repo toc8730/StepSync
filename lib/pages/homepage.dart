@@ -12,11 +12,14 @@ import '../services/family_service.dart';
 
 import '../widgets/task_editor_dialog.dart';
 import '../widgets/template_picker_dialog.dart';
+import '../widgets/routine_picker_dialog.dart';
 import '../widgets/ai_prompt_dialog.dart';
 import '../widgets/task_tile.dart';
 import '../pages/task_detail_page.dart';
 import 'login_page.dart';
 import 'profile_page.dart';
+import 'routine_editor_page.dart';
+import '../services/routine_service.dart';
 
 class HomePage extends StatefulWidget {
   final String username;
@@ -314,23 +317,75 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _askAi() async {
-    final tasks = await AiPromptDialog.showAndGenerate(context);
-    if (tasks.isNotEmpty && mounted) {
-      setState(() {
-        for (final t in tasks) {
-          _ctrl.add(t);
-        }
-      });
-      for (final t in tasks) {
-        await _serverAdd(t);
-      }
-      await _loadFromServer();
-      _snack('${tasks.length} task${tasks.length == 1 ? '' : 's'} added from AI');
-    }
+    final result = await AiPromptDialog.showAndGenerate(context);
+    if (!mounted || result == null) return;
+    await _handleRoutineResult(result);
   }
 
   Future<void> _onEdit(Task before, Task after) async => _serverEdit(before, after);
   Future<void> _onDelete(Task t) async => _serverRemove(t);
+
+  Future<void> _showRoutinePicker() async {
+    final result = await RoutinePickerDialog.pick(context);
+    if (!mounted || result == null) return;
+    await _handleRoutineResult(result);
+  }
+
+  Future<void> _handleRoutineResult(RoutineEditorResult result) async {
+    if (result.tasks.isEmpty) {
+      _snack('Routine has no tasks yet.');
+      return;
+    }
+    switch (result.outcome) {
+      case RoutineEditorOutcome.deploy:
+        setState(() {
+          for (final t in result.tasks) {
+            _ctrl.add(t);
+          }
+        });
+        for (final t in result.tasks) {
+          await _serverAdd(t);
+        }
+        await _loadFromServer();
+        _snack('Deployed ${result.tasks.length} task${result.tasks.length == 1 ? '' : 's'}.');
+        break;
+      case RoutineEditorOutcome.saveRoutine:
+        try {
+          await RoutineService.saveRoutine(
+            routineId: result.routineId,
+            title: result.name,
+            tasks: result.tasks,
+          );
+          _snack('Saved routine "${result.name}".');
+        } catch (e) {
+          _snack('Failed to save routine: $e');
+        }
+        break;
+    }
+  }
+
+  Future<void> _confirmDeleteAllTasks() async {
+    if (_ctrl.all.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete all tasks?'),
+        content: const Text('This will remove every task currently scheduled. This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete all')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final tasks = List<Task>.from(_ctrl.all);
+    for (final task in tasks) {
+      await _serverRemove(task);
+    }
+    await _loadFromServer();
+    _snack('Deleted all tasks.');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -350,6 +405,20 @@ class _HomePageState extends State<HomePage> {
             child: IconButton(
               icon: const Icon(Icons.auto_awesome),
               onPressed: _canAssign ? () => _addFromTemplate() : null,
+            ),
+          ),
+          Tooltip(
+            message: 'Browse premade routines',
+            child: IconButton(
+              icon: const Icon(Icons.bolt),
+              onPressed: _canAssign ? () => _showRoutinePicker() : null,
+            ),
+          ),
+          Tooltip(
+            message: 'Delete all tasks',
+            child: IconButton(
+              icon: const Icon(Icons.delete_sweep),
+              onPressed: _canAssign && _ctrl.all.isNotEmpty ? _confirmDeleteAllTasks : null,
             ),
           ),
           PopupMenuButton<String>(

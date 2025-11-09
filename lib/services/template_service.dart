@@ -59,8 +59,8 @@ class TemplateService {
   static List<SavedTemplate> _parseList(dynamic raw) {
     if (raw is! List) return const [];
     return raw
-        .where((item) => item is Map)
-        .map((item) => SavedTemplate.fromJson(Map<String, dynamic>.from(item as Map)))
+        .whereType<Map>()
+        .map((item) => SavedTemplate.fromJson(Map<String, dynamic>.from(item)))
         .toList();
   }
 

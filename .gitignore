@@ -49,3 +49,4 @@ app.*.map.json
 
 # Local dart defines (OAuth client IDs, etc.)
 dart_defines.json
+backend/instance/users.db

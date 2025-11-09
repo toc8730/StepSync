@@ -128,6 +128,47 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
     }
   }
 
+  Future<void> _deleteAllTemplates() async {
+    final deletable = [
+      ..._personal.where((t) => t.canDelete && t.id != null),
+      ..._family.where((t) => t.canDelete && t.id != null),
+    ];
+    if (deletable.isEmpty) {
+      _snack('No templates you can delete.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete all templates?'),
+        content: Text('Remove ${deletable.length} template${deletable.length == 1 ? '' : 's'} permanently?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete all')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _mutating = true);
+    try {
+      for (final item in deletable) {
+        await TemplateService.deleteTemplate(item.id!);
+      }
+      if (!mounted) return;
+      setState(() {
+        _personal = _personal.where((t) => !(t.canDelete && t.id != null)).toList();
+        _family = _family.where((t) => !(t.canDelete && t.id != null)).toList();
+      });
+      _snack('Deleted ${deletable.length} template${deletable.length == 1 ? '' : 's'}.');
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Failed to delete templates: $e');
+    } finally {
+      if (mounted) setState(() => _mutating = false);
+    }
+  }
+
   Future<bool?> _promptShareScope() async {
     bool share = false;
     return showDialog<bool>(
@@ -282,6 +323,11 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
                   tooltip: 'Refresh templates',
                   icon: const Icon(Icons.refresh),
                   onPressed: _loading ? null : _loadTemplates,
+                ),
+                IconButton(
+                  tooltip: 'Delete all my templates',
+                  icon: const Icon(Icons.delete_sweep),
+                  onPressed: _mutating ? null : _deleteAllTemplates,
                 ),
               ],
             ),
