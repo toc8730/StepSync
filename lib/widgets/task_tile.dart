@@ -154,34 +154,26 @@ class _TaskTileState extends State<TaskTile> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               const Text('• '),
-                              Expanded(child: Text(s)),
+                              Flexible(child: Text(s)),
+                              if (imgs.isNotEmpty) ...[
+                                //const SizedBox(height: 4),
+                                SizedBox(
+                                width: 75, // or any reasonable fixed width
+                                height: 75,
+                                child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: Image.memory(
+                                      imgs[0].bytes,
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
-                          if (imgs.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            GridView.builder(
-                              shrinkWrap: true,
-                              physics:
-                                  const NeverScrollableScrollPhysics(),
-                              itemCount: imgs.length,
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 3,
-                                mainAxisSpacing: 6,
-                                crossAxisSpacing: 6,
-                              ),
-                              itemBuilder: (_, j) => ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.memory(
-                                  imgs[j].bytes,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     );
