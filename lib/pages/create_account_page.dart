@@ -74,8 +74,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       if (!mounted) return;
 
       if (res.statusCode == 200) {
-        _snack('Account created. You can sign in now.');
-        Navigator.of(context).pop();
+        _snack('Account created. Signing you in…');
+        final result = CreateAccountResult(
+          username: u,
+          password: p,
+          role: _type == AccountType.child ? 'child' : 'parent',
+        );
+        Navigator.of(context).pop(result);
       } else {
         final msg = _safeError(res.body) ?? 'Create failed (${res.statusCode})';
         _snack(msg);
@@ -173,4 +178,16 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       ),
     );
   }
+}
+
+class CreateAccountResult {
+  const CreateAccountResult({
+    required this.username,
+    required this.password,
+    required this.role,
+  });
+
+  final String username;
+  final String password;
+  final String role;
 }

@@ -14,7 +14,16 @@ import 'create_account_page.dart';
 import 'homepage.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({
+    super.key,
+    this.initialUsername,
+    this.initialPassword,
+    this.autoSubmit = false,
+  });
+
+  final String? initialUsername;
+  final String? initialPassword;
+  final bool autoSubmit;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -42,6 +51,23 @@ class _LoginPageState extends State<LoginPage> {
       clientId: GoogleOAuthConfig.platformClientId,
       serverClientId: GoogleOAuthConfig.serverClientId,
     );
+
+    if ((widget.initialUsername ?? '').isNotEmpty) {
+      _usernameController.text = widget.initialUsername!;
+    }
+    if ((widget.initialPassword ?? '').isNotEmpty) {
+      _passwordController.text = widget.initialPassword!;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.autoSubmit &&
+          (widget.initialUsername ?? '').isNotEmpty &&
+          (widget.initialPassword ?? '').isNotEmpty) {
+        _refreshCanSignIn();
+        _signIn();
+      }
+    });
   }
 
   void _refreshCanSignIn() {
@@ -58,12 +84,20 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _navigateToCreateAccount() async {
-    await Navigator.of(context).push(
+    final result = await Navigator.of(context).push<CreateAccountResult?>(
       MaterialPageRoute(builder: (_) => const CreateAccountPage()),
     );
-    _usernameController.clear();
-    _passwordController.clear();
-    _refreshCanSignIn();
+    if (!mounted) return;
+    if (result != null) {
+      _usernameController.text = result.username;
+      _passwordController.text = result.password;
+      _refreshCanSignIn();
+      await _signIn();
+    } else {
+      _usernameController.clear();
+      _passwordController.clear();
+      _refreshCanSignIn();
+    }
   }
 
   Future<void> _signIn() async {

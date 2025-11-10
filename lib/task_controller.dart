@@ -4,6 +4,9 @@ import 'models/task.dart';
 import 'services/push_notifications.dart';
 
 class TaskController extends ChangeNotifier {
+  TaskController({this.enableScheduling = true});
+
+  final bool enableScheduling;
   final List<Task> _tasks = [];
 
   List<Task> get all => List.unmodifiable(_tasks);
@@ -102,6 +105,7 @@ class TaskController extends ChangeNotifier {
   // =========================
 
   void _scheduleFor(Task t) {
+    if (!enableScheduling) return;
     if (t.hidden || t.completed) return;
     final now = DateTime.now();
     final dt = _startDateTime(t, now);
@@ -113,6 +117,7 @@ class TaskController extends ChangeNotifier {
   }
 
   void _cancelFor(Task t) {
+    if (!enableScheduling) return;
     final now = DateTime.now();
     final dt = _startDateTime(t, now);
     if (dt != null) {

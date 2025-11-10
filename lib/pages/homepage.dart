@@ -16,7 +16,9 @@ import '../widgets/routine_picker_dialog.dart';
 import '../widgets/ai_prompt_dialog.dart';
 import '../widgets/task_tile.dart';
 import '../pages/task_detail_page.dart';
+import '../widgets/quick_actions.dart';
 import 'login_page.dart';
+import 'welcome_page.dart';
 import 'profile_page.dart';
 import 'routine_editor_page.dart';
 import '../services/routine_service.dart';
@@ -285,8 +287,9 @@ class _HomePageState extends State<HomePage> {
         break;
       case 'signout':
         if (!mounted) return;
+        AppGlobals.token = '';
         await Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
+          MaterialPageRoute(builder: (_) => const WelcomePage()),
           (route) => false,
         );
         break;
@@ -393,34 +396,6 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('Home'),
         actions: [
-          Tooltip(
-            message: 'Ask AI to generate tasks',
-            child: IconButton(
-              icon: const Icon(Icons.auto_fix_high),
-              onPressed: _canAssign ? () => _askAi() : null,
-            ),
-          ),
-          Tooltip(
-            message: 'Choose a premade task',
-            child: IconButton(
-              icon: const Icon(Icons.auto_awesome),
-              onPressed: _canAssign ? () => _addFromTemplate() : null,
-            ),
-          ),
-          Tooltip(
-            message: 'Browse premade routines',
-            child: IconButton(
-              icon: const Icon(Icons.bolt),
-              onPressed: _canAssign ? () => _showRoutinePicker() : null,
-            ),
-          ),
-          Tooltip(
-            message: 'Delete all tasks',
-            child: IconButton(
-              icon: const Icon(Icons.delete_sweep),
-              onPressed: _canAssign && _ctrl.all.isNotEmpty ? _confirmDeleteAllTasks : null,
-            ),
-          ),
           PopupMenuButton<String>(
             tooltip: 'Menu',
             onSelected: (value) {
@@ -451,6 +426,9 @@ class _HomePageState extends State<HomePage> {
         children: [
           if (_pendingLeaveRequests > 0) _leaveRequestsBanner(),
           _assignmentBanner(),
+          const SizedBox(height: 8),
+          _quickActions(context),
+          const SizedBox(height: 12),
           Expanded(
             child: AnimatedBuilder(
               animation: _ctrl,
@@ -545,6 +523,46 @@ class _HomePageState extends State<HomePage> {
             )
         ],
       ),
+    );
+  }
+
+  Widget _quickActions(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return QuickActionRow(
+      actions: [
+        QuickAction(
+          id: 'ai',
+          icon: Icons.auto_fix_high,
+          label: 'Ask AI',
+          color: scheme.primary,
+          onPressed: _canAssign ? _askAi : null,
+          enabled: _canAssign,
+        ),
+        QuickAction(
+          id: 'templates',
+          icon: Icons.auto_awesome,
+          label: 'Templates',
+          color: scheme.secondary,
+          onPressed: _canAssign ? _addFromTemplate : null,
+          enabled: _canAssign,
+        ),
+        QuickAction(
+          id: 'routines',
+          icon: Icons.bolt,
+          label: 'Routines',
+          color: scheme.tertiary,
+          onPressed: _canAssign ? _showRoutinePicker : null,
+          enabled: _canAssign,
+        ),
+        QuickAction(
+          id: 'delete',
+          icon: Icons.delete_sweep,
+          label: 'Delete all',
+          color: scheme.error,
+          onPressed: _canAssign && _ctrl.all.isNotEmpty ? _confirmDeleteAllTasks : null,
+          enabled: _canAssign && _ctrl.all.isNotEmpty,
+        ),
+      ],
     );
   }
 

@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'pages/login_page.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'theme_controller.dart';
+import 'pages/welcome_page.dart';
 
 // Your firebase_options.dart is inside /lib/pages in this project.
 import 'firebase_options.dart';
@@ -46,7 +46,7 @@ class MyApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         themeMode: ThemeController.instance.mode,
-        home: const LoginPage(),
+        home: const WelcomePage(),
       ),
     );
   }

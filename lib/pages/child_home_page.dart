@@ -12,6 +12,7 @@ import '../models/task.dart';
 import '../widgets/task_tile.dart';
 import '../pages/task_detail_page.dart';
 import 'login_page.dart';
+import 'welcome_page.dart';
 import 'profile_page.dart';
 
 class ChildHomePage extends StatefulWidget {
@@ -130,8 +131,9 @@ class _ChildHomePageState extends State<ChildHomePage> {
         break;
       case 'signout':
         if (!mounted) return;
+        AppGlobals.token = '';
         await Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
+          MaterialPageRoute(builder: (_) => const WelcomePage()),
           (route) => false,
         );
         break;
