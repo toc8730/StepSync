@@ -1207,8 +1207,7 @@ def account_switch_google():
     user = _current_user_from_token()
     if not user:
         return jsonify({"error": "User not found"}), 404
-    if (user.auth_provider or "password") != "google":
-        return jsonify({"error": "Google sign-in is not linked to this account."}), 400
+    linking = (user.auth_provider or "password") != "google"
 
     payload = request.get_json(silent=True) or {}
     id_token = (payload.get("id_token") or "").strip()
@@ -1225,7 +1224,7 @@ def account_switch_google():
     email = (info.get("email") or "").strip().lower()
     if not email:
         return jsonify({"error": "Google account is missing an email address."}), 400
-    if user.email and user.email.lower() == email:
+    if not linking and user.email and user.email.lower() == email:
         return jsonify({"error": "That Google account is already linked."}), 400
 
     conflict = User.query.filter(User.email == email, User.id != user.id).first()
@@ -1238,7 +1237,7 @@ def account_switch_google():
     db.session.commit()
     new_token = create_access_token(identity=user.username)
     return jsonify({
-        "message": "Google account updated.",
+        "message": "Google account linked." if linking else "Google account updated.",
         "username": user.username,
         "email": user.email,
         "token": new_token,

@@ -808,8 +808,12 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _switchGoogleAccount() async {
-    if (_authProvider != 'google') {
+  Future<void> _linkGoogleAccount() async => _connectGoogleAccount(linking: true);
+
+  Future<void> _switchGoogleAccount() async => _connectGoogleAccount(linking: false);
+
+  Future<void> _connectGoogleAccount({required bool linking}) async {
+    if (!linking && _authProvider != 'google') {
       setState(() {
         _googleError = 'This account is not linked to Google.';
         _googleSuccess = null;
@@ -842,10 +846,12 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() => _googleError = 'Google did not return a usable credential.');
         return;
       }
-      final normalizedCurrent = (_email ?? '').toLowerCase();
-      if (normalizedCurrent.isNotEmpty && account.email.toLowerCase() == normalizedCurrent) {
-        setState(() => _googleError = 'That Google account is already linked.');
-        return;
+      if (!linking) {
+        final normalizedCurrent = (_email ?? '').toLowerCase();
+        if (normalizedCurrent.isNotEmpty && account.email.toLowerCase() == normalizedCurrent) {
+          setState(() => _googleError = 'That Google account is already linked.');
+          return;
+        }
       }
 
       final response = await AccountService.switchGoogleAccount(
@@ -856,14 +862,18 @@ class _ProfilePageState extends State<ProfilePage> {
       if (response.token != null) {
         AppGlobals.token = response.token!;
       }
+      await _fetchProfile();
       setState(() {
         if (response.email != null) {
           _email = response.email;
         }
-        _googleSuccess = 'Google account updated.';
+        if (linking) {
+          _authProvider = 'google';
+        }
+        _googleSuccess = linking ? 'Google account linked.' : 'Google account updated.';
         _googleError = null;
       });
-      _showSnack('Google account updated.');
+      _showSnack(_googleSuccess ?? 'Google account updated.');
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1127,7 +1137,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
                 if (_role == 'child') _childInvitesCard(),
                 _accountSettingsCard(),
-                if (_authProvider == 'google') _googleAccountCard(),
+                if (_authProvider == 'google')
+                  _googleAccountCard()
+                else
+                  _googleLinkCard(),
               ],
             ),
           );
@@ -1299,6 +1312,60 @@ class _ProfilePageState extends State<ProfilePage> {
                     )
                   : const Icon(Icons.swap_horiz),
               label: Text(_switchingGoogle ? 'Switching...' : 'Switch Google account'),
+            ),
+            if (configIssue != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Google sign-in unavailable: $configIssue',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                ),
+              ),
+            if (_googleError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _googleError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                ),
+              ),
+            if (_googleSuccess != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _googleSuccess!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _googleLinkCard() {
+    final configIssue = GoogleOAuthConfig.configurationHint();
+    final disabled = configIssue != null || _switchingGoogle;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Link Google for quick sign-in', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text(
+              'Connect a Google account so you can sign in with one tap and share secure tokens across devices.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: disabled ? null : _linkGoogleAccount,
+              icon: _switchingGoogle
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.link),
+              label: Text(_switchingGoogle ? 'Linking...' : 'Link Google account'),
             ),
             if (configIssue != null)
               Padding(
