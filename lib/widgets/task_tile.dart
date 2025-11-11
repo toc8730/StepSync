@@ -17,6 +17,10 @@ class TaskTile extends StatefulWidget {
     this.stepsWithImages = const <TaskStep>[],
     this.onOpen, // optional legacy hook
     this.readOnly = false,
+    this.toggleButtonKey,
+    this.editButtonKey,
+    this.deleteButtonKey,
+    this.openButtonKey,
   });
 
   final Task task;
@@ -32,6 +36,10 @@ class TaskTile extends StatefulWidget {
 
   /// Hide edit/delete when true (child view).
   final bool readOnly;
+  final Key? toggleButtonKey;
+  final Key? editButtonKey;
+  final Key? deleteButtonKey;
+  final Key? openButtonKey;
 
   @override
   State<TaskTile> createState() => _TaskTileState();
@@ -53,50 +61,62 @@ class _TaskTileState extends State<TaskTile> {
         if (!widget.readOnly)
           Tooltip(
             message: 'Edit task',
-            child: IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: widget.onEdit,
-              visualDensity: VisualDensity.compact,
+            child: KeyedSubtree(
+              key: widget.editButtonKey,
+              child: IconButton(
+                icon: const Icon(Icons.edit),
+                onPressed: widget.onEdit,
+                visualDensity: VisualDensity.compact,
+              ),
             ),
           ),
         if (!widget.readOnly)
           Tooltip(
             message: 'Delete task',
-            child: IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: widget.onDelete,
-              visualDensity: VisualDensity.compact,
+            child: KeyedSubtree(
+              key: widget.deleteButtonKey,
+              child: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: widget.onDelete,
+                visualDensity: VisualDensity.compact,
+              ),
             ),
           ),
         Tooltip(
           message: t.completed ? 'Mark as not completed' : 'Mark as completed',
-          child: IconButton(
-            icon: Icon(
-              t.completed ? Icons.check_circle : Icons.check_circle_outline,
+          child: KeyedSubtree(
+            key: widget.toggleButtonKey,
+            child: IconButton(
+              icon: Icon(
+                t.completed ? Icons.check_circle : Icons.check_circle_outline,
+              ),
+              onPressed: widget.onToggle,
+              visualDensity: VisualDensity.compact,
             ),
-            onPressed: widget.onToggle,
-            visualDensity: VisualDensity.compact,
           ),
         ),
         Tooltip(
           message: 'Open (pop-out)',
-          child: IconButton(
-            icon: const Icon(Icons.open_in_new),
-            onPressed: () {
-              // If caller provided a custom handler, use it.
-              if (widget.onOpen != null) {
-                widget.onOpen!();
-                return;
-              }
-              // Default behavior: show the Step Viewer dialog (your pop-out UX).
-              StepViewerDialog.show(
-                context,
-                task: widget.task,
-                stepsWithImages: resolvedSteps,
-                initialIndex: 0,
-              );
-            },
-            visualDensity: VisualDensity.compact,
+          child: KeyedSubtree(
+            key: widget.openButtonKey,
+            child: IconButton(
+              icon: const Icon(Icons.open_in_new),
+              onPressed: () {
+                // If caller provided a custom handler, use it.
+                if (widget.onOpen != null) {
+                  widget.onOpen!();
+                  return;
+                }
+                // Default behavior: show the Step Viewer dialog (your pop-out UX).
+                StepViewerDialog.show(
+                  context,
+                  task: widget.task,
+                  stepsWithImages: resolvedSteps,
+                  initialIndex: 0,
+                );
+              },
+              visualDensity: VisualDensity.compact,
+            ),
           ),
         ),
         const SizedBox(width: 6),

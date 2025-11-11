@@ -60,12 +60,32 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
       arrowAngle: -math.pi / 2,
     ),
     _GuideStep(
-      id: 'tasks',
-      title: 'Task controls',
-      description:
-          'Each card has buttons to mark done, edit, delete, or pop-out the step viewer. Try them all to finish.',
-      targetId: 'tasks',
-      arrowAngle: math.pi / 2,
+      id: 'task_edit',
+      title: 'Edit a task',
+      description: 'Use the pencil to tweak steps, times, or reminders.',
+      targetId: 'task_edit',
+      arrowAngle: math.pi,
+    ),
+    _GuideStep(
+      id: 'task_open',
+      title: 'Open pop-out view',
+      description: 'Pop-out shows detailed steps, pictures, and text-to-speech.',
+      targetId: 'task_open',
+      arrowAngle: math.pi,
+    ),
+    _GuideStep(
+      id: 'task_toggle',
+      title: 'Mark tasks done',
+      description: 'Tap the check icon to mark a task complete or undo it.',
+      targetId: 'task_toggle',
+      arrowAngle: math.pi,
+    ),
+    _GuideStep(
+      id: 'task_delete',
+      title: 'Delete a task',
+      description: 'Trash can removes a task from today’s schedule.',
+      targetId: 'task_delete',
+      arrowAngle: math.pi,
     ),
   ];
 
@@ -74,8 +94,21 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
     'templates': GlobalKey(),
     'routines': GlobalKey(),
     'fab': GlobalKey(),
-    'tasks': GlobalKey(),
+    'task_toggle': GlobalKey(),
+    'task_edit': GlobalKey(),
+    'task_delete': GlobalKey(),
+    'task_open': GlobalKey(),
     'delete': GlobalKey(),
+  };
+  final Map<String, Offset> _arrowOffsets = {
+    'ai': const Offset(2, 30),
+    'templates': const Offset(2, 30),
+    'routines': const Offset(0, 30),
+    'fab': const Offset(-20, 0),
+    'task_toggle': const Offset(-15, 60),
+    'task_edit': const Offset(0, 60),
+    'task_delete': const Offset(-13, 305),
+    'task_open': const Offset(-15, 60),
   };
   final GlobalKey _stackKey = GlobalKey();
 
@@ -107,13 +140,14 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
   bool _completed = false;
   bool _bannerShown = false;
   bool _chromeVisible = true;
-  final Set<String> _taskActionProgress = {};
   final Set<String> _explainedTaskActions = {};
   late final AnimationController _arrowPulse;
   late final Animation<double> _arrowScale;
   Timer? _tipTimer;
   String? _tipMessage;
   Offset? _tipPosition;
+  final Set<String> _claimedTargets = {};
+  Task? _focusTask;
 
   _GuideStep get _currentStep => _steps[_stepIndex];
 
@@ -123,6 +157,9 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
     _ctrl = TaskController(enableScheduling: false);
     for (final task in _demoTasks) {
       _ctrl.load(task);
+    }
+    if (_ctrl.all.isNotEmpty) {
+      _focusTask = _ctrl.all.first;
     }
     _arrowPulse = AnimationController(
       vsync: this,
@@ -348,14 +385,20 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
     final edited = await TaskEditorDialog.show(context, initial: task);
     if (edited != null) {
       _ctrl.update(idx, edited);
-      _trackTaskAction('edit');
+      if (identical(task, _focusTask)) {
+        _focusTask = _ctrl.all[idx];
+      }
     }
+    _trackTaskAction('edit');
   }
 
   Future<void> _handleDelete(Task task) async {
     final idx = _ctrl.all.indexOf(task);
     if (idx == -1) return;
     _ctrl.removeAt(idx);
+    if (identical(task, _focusTask)) {
+      _focusTask = _ctrl.all.isNotEmpty ? _ctrl.all.first : null;
+    }
     _trackTaskAction('delete');
   }
 
@@ -370,23 +413,28 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
 
   void _trackTaskAction(String key) {
     if (_completed) return;
-    _taskActionProgress.add(key);
+    final targetId = switch (key) {
+      'toggle' => 'task_toggle',
+      'edit' => 'task_edit',
+      'delete' => 'task_delete',
+      'open' => 'task_open',
+      _ => 'task_toggle',
+    };
     if (_explainedTaskActions.add(key)) {
       final desc = _taskActionDescriptions[key];
       if (desc != null) {
-        _showTip(desc, 'tasks');
+        _showTip(desc, targetId);
       }
     }
-    if (_currentStep.id == 'tasks' && _taskActionProgress.containsAll(_requiredTaskActions)) {
-      _completeStepIf('tasks');
-    } else if (_currentStep.id == 'tasks') {
-      final remaining = _requiredTaskActions.length - _taskActionProgress.length;
-      _showTip('Great! $remaining more action${remaining == 1 ? '' : 's'} to try.', 'tasks');
+    final stepId = targetId;
+    if (_currentStep.id == stepId) {
+      _completeStepIf(stepId);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    _claimedTargets.clear();
     final highlightId = _completed ? null : _currentStep.id;
     final scheme = Theme.of(context).colorScheme;
     final arrowPosition = !_completed ? _arrowPositionForStep(_currentStep) : null;
@@ -395,7 +443,9 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
         if (mounted) setState(() {});
       });
     }
+    final nextTitle = (_stepIndex + 1 < _steps.length) ? _steps[_stepIndex + 1].title : null;
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('Explore My App'),
         leadingWidth: 116,
@@ -428,74 +478,78 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
       ),
       body: Stack(
         key: _stackKey,
+        clipBehavior: Clip.none,
         children: [
-          Column(
-            children: [
-              const SizedBox(height: 8),
-              QuickActionRow(
-                actions: [
-                  QuickAction(
-                    id: 'ai',
-                    icon: Icons.auto_fix_high,
-                    label: 'Ask AI',
-                    color: scheme.primary,
-                    onPressed: () => _handleActionTap('ai'),
-                    enabled: _completed || highlightId == 'ai',
-                    highlight: highlightId == 'ai',
-                    key: _targetKeys['ai'],
-                  ),
-                  QuickAction(
-                    id: 'templates',
-                    icon: Icons.auto_awesome,
-                    label: 'Templates',
-                    color: scheme.secondary,
-                    onPressed: () => _handleActionTap('templates'),
-                    enabled: _completed || highlightId == 'templates',
-                    highlight: highlightId == 'templates',
-                    key: _targetKeys['templates'],
-                  ),
-                  QuickAction(
-                    id: 'routines',
-                    icon: Icons.bolt,
-                    label: 'Routines',
-                    color: scheme.tertiary,
-                    onPressed: () => _handleActionTap('routines'),
-                    enabled: _completed || highlightId == 'routines',
-                    highlight: highlightId == 'routines',
-                    key: _targetKeys['routines'],
-                  ),
-                  QuickAction(
-                    id: 'delete',
-                    icon: Icons.delete_sweep,
-                    label: 'Delete all',
-                    color: scheme.error,
-                    onPressed: () => _showTip('Demo mode only — nothing actually deleted.', 'delete'),
-                    key: _targetKeys['delete'],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: AnimatedBuilder(
-                  animation: _ctrl,
-                  builder: (context, _) => ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                    children: [
-                      _sectionHeader(context, 'Earlier Today', Icons.wb_sunny_outlined, _ctrl.earlierToday.length),
-                      ..._buildTaskTiles(_ctrl.earlierToday, highlightId == 'tasks'),
-                      const SizedBox(height: 12),
-                      _sectionHeader(context, 'Later Today', Icons.nights_stay_outlined, _ctrl.laterToday.length),
-                      ..._buildTaskTiles(_ctrl.laterToday, highlightId == 'tasks'),
-                      const SizedBox(height: 12),
-                      _sectionHeader(context, 'Completed Tasks', Icons.check_circle, _ctrl.completed.length),
-                      ..._buildTaskTiles(_ctrl.completed, highlightId == 'tasks'),
-                    ],
+          Padding(
+            padding: EdgeInsets.only(top: kToolbarHeight + 16),
+            child: Column(
+              children: [
+                const SizedBox(height: 8),
+                QuickActionRow(
+                  actions: [
+                    QuickAction(
+                      id: 'ai',
+                      icon: Icons.auto_fix_high,
+                      label: 'Ask AI',
+                      color: scheme.primary,
+                      onPressed: () => _handleActionTap('ai'),
+                      enabled: _completed || highlightId == 'ai',
+                      highlight: highlightId == 'ai',
+                      key: _targetKeys['ai'],
+                    ),
+                    QuickAction(
+                      id: 'templates',
+                      icon: Icons.auto_awesome,
+                      label: 'Templates',
+                      color: scheme.secondary,
+                      onPressed: () => _handleActionTap('templates'),
+                      enabled: _completed || highlightId == 'templates',
+                      highlight: highlightId == 'templates',
+                      key: _targetKeys['templates'],
+                    ),
+                    QuickAction(
+                      id: 'routines',
+                      icon: Icons.bolt,
+                      label: 'Routines',
+                      color: scheme.tertiary,
+                      onPressed: () => _handleActionTap('routines'),
+                      enabled: _completed || highlightId == 'routines',
+                      highlight: highlightId == 'routines',
+                      key: _targetKeys['routines'],
+                    ),
+                    QuickAction(
+                      id: 'delete',
+                      icon: Icons.delete_sweep,
+                      label: 'Delete all',
+                      color: scheme.error,
+                      onPressed: () => _showTip('Demo mode only — nothing actually deleted.', 'delete'),
+                      key: _targetKeys['delete'],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: AnimatedBuilder(
+                    animation: _ctrl,
+                    builder: (context, _) => ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                      children: [
+                        _sectionHeader(context, 'Earlier Today', Icons.wb_sunny_outlined, _ctrl.earlierToday.length),
+                      ..._buildTaskTiles(_ctrl.earlierToday, highlightId),
+                        const SizedBox(height: 12),
+                        _sectionHeader(context, 'Later Today', Icons.nights_stay_outlined, _ctrl.laterToday.length),
+                      ..._buildTaskTiles(_ctrl.laterToday, highlightId),
+                        const SizedBox(height: 12),
+                        _sectionHeader(context, 'Completed Tasks', Icons.check_circle, _ctrl.completed.length),
+                      ..._buildTaskTiles(_ctrl.completed, highlightId),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          if (!_completed) _InstructionCard(step: _currentStep),
+          if (!_completed) _InstructionCard(step: _currentStep, nextTitle: nextTitle),
           if (arrowPosition != null)
             _ArrowPointer(
               position: arrowPosition,
@@ -543,10 +597,18 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
     const iconSize = 48.0;
     final direction = Offset(-math.sin(step.arrowAngle), math.cos(step.arrowAngle));
     final iconCenter = targetCenter - direction * 72;
-    return iconCenter - const Offset(iconSize / 2, iconSize / 2);
+    final tweak = _arrowOffsets[step.targetId] ?? Offset.zero;
+    return iconCenter - const Offset(iconSize / 2, iconSize / 2) + tweak;
   }
 
-  List<Widget> _buildTaskTiles(List<Task> tasks, bool highlight) {
+  GlobalKey? _claimTarget(String id) {
+    if (id.isEmpty) return null;
+    if (_claimedTargets.contains(id)) return null;
+    _claimedTargets.add(id);
+    return _targetKeys[id];
+  }
+
+  List<Widget> _buildTaskTiles(List<Task> tasks, String? highlightId) {
     if (tasks.isEmpty) {
       return [
         Padding(
@@ -561,24 +623,33 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
       ];
     }
     return tasks.asMap().entries.map((entry) {
-      final index = entry.key;
       final task = entry.value;
-      final key = (highlight && index == 0) ? _targetKeys['tasks'] : null;
+      final bool isFocus = identical(task, _focusTask);
+      final bool highlightTile = isFocus &&
+          (highlightId == 'task_edit' ||
+              highlightId == 'task_open' ||
+              highlightId == 'task_toggle' ||
+              highlightId == 'task_delete');
+      final toggleKey = highlightTile && highlightId == 'task_toggle' ? _claimTarget('task_toggle') : null;
+      final editKey = highlightTile && highlightId == 'task_edit' ? _claimTarget('task_edit') : null;
+      final deleteKey = highlightTile && highlightId == 'task_delete' ? _claimTarget('task_delete') : null;
+      final openKey = highlightTile && highlightId == 'task_open' ? _claimTarget('task_open') : null;
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
-        child: KeyedSubtree(
-          key: key,
-          child: _GuidedGlow(
-            active: highlight,
-            child: TaskTile(
-              task: task,
-              onToggle: () => _handleToggle(task),
-              onEdit: () => _handleEdit(task),
-              onDelete: () => _handleDelete(task),
-              onOpen: () => _handleOpen(task),
-              strikeThroughWhenCompleted: true,
-              stepsWithImages: resolveTaskSteps(task),
-            ),
+        child: _GuidedGlow(
+          active: highlightTile,
+          child: TaskTile(
+            task: task,
+            onToggle: () => _handleToggle(task),
+            onEdit: () => _handleEdit(task),
+            onDelete: () => _handleDelete(task),
+            onOpen: () => _handleOpen(task),
+            strikeThroughWhenCompleted: true,
+            stepsWithImages: resolveTaskSteps(task),
+            toggleButtonKey: toggleKey,
+            editButtonKey: editKey,
+            deleteButtonKey: deleteKey,
+            openButtonKey: openKey,
           ),
         ),
       );
@@ -619,9 +690,10 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
 }
 
 class _InstructionCard extends StatelessWidget {
-  const _InstructionCard({required this.step});
+  const _InstructionCard({required this.step, this.nextTitle});
 
   final _GuideStep step;
+  final String? nextTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -641,6 +713,10 @@ class _InstructionCard extends StatelessWidget {
               Text(step.title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               Text(step.description),
+              if (nextTitle != null) ...[
+                const SizedBox(height: 8),
+                Text('Next: $nextTitle', style: Theme.of(context).textTheme.bodySmall),
+              ],
             ],
           ),
         ),

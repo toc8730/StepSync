@@ -338,76 +338,79 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final maxWidth = MediaQuery.of(context).size.width;
+    final formWidth = maxWidth < 600 ? maxWidth * 0.9 : maxWidth / 3.5;
     return Scaffold(
       appBar: AppBar(title: const Text('Login')),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              TextField(
-                controller: _usernameController,
-                decoration: const InputDecoration(
-                  labelText: 'Username or Email',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscure,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _canSignIn ? () => _signIn() : null,
-                      child: const Text('Sign In'),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: formWidth),
+            child: Card(
+              elevation: 4,
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: _usernameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Username or Email',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => _navigateToCreateAccount(),
-                      child: const Text('Create Account'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _passwordController,
+                      obscureText: _obscure,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () => setState(() => _obscure = !_obscure),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: (!_googleLoading && GoogleOAuthConfig.isConfigured) ? _signInWithGoogle : null,
-                icon: _googleLoading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.login),
-                label: const Text('Sign in with Google'),
-              ),
-              if (!GoogleOAuthConfig.isConfigured && GoogleOAuthConfig.configurationHint() != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  GoogleOAuthConfig.configurationHint()!,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.orange),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _canSignIn ? _signIn : null,
+                        child: const Text('Sign In'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: _navigateToCreateAccount,
+                        child: const Text('Create Account'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: (!_googleLoading && GoogleOAuthConfig.isConfigured) ? _signInWithGoogle : null,
+                      icon: _googleLoading
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.login),
+                      label: const Text('Sign in with Google'),
+                    ),
+                    if (!GoogleOAuthConfig.isConfigured && GoogleOAuthConfig.configurationHint() != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        GoogleOAuthConfig.configurationHint()!,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(color: Colors.orange, height: 1.2),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
-            ],
+              ),
+            ),
           ),
         ),
       ),
