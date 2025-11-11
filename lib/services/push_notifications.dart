@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:convert';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +24,10 @@ class PushNotifications {
 
   static bool _initialized = false;
   static bool _timezoneReady = false;
+  static final StreamController<String> _notificationTapController =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get notificationTaps => _notificationTapController.stream;
 
   static const AndroidNotificationChannel _defaultChannel =
       AndroidNotificationChannel(
@@ -124,10 +130,23 @@ class PushNotifications {
       await _plugin.initialize(
         initSettings,
         onDidReceiveNotificationResponse: (NotificationResponse response) {
-          // Could route to task detail later.
-          debugPrint('Notification tapped: ${response.payload}');
+          final payload = response.payload;
+          if (payload != null && payload.isNotEmpty) {
+            debugPrint('[PushNotifications] Notification tap payload: $payload');
+            _notificationTapController.add(payload);
+          }
         },
       );
+      final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+      final initialPayload = launchDetails?.notificationResponse?.payload;
+      if ((launchDetails?.didNotificationLaunchApp ?? false) &&
+          initialPayload != null &&
+          initialPayload.isNotEmpty) {
+        Future.microtask(() {
+          debugPrint('[PushNotifications] App launched from notification: $initialPayload');
+          _notificationTapController.add(initialPayload);
+        });
+      }
     } catch (e) {
       debugPrint('Local notification init error: $e');
     }
@@ -257,7 +276,7 @@ class PushNotifications {
         fireTime,
         notificationDetails,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: 'task:${task.title}',
+        payload: _buildPayload(task, originalStart),
         matchDateTimeComponents: null,
       );
       debugPrint('[PushNotifications] Reminder scheduled (id=$id).');
@@ -303,6 +322,17 @@ class PushNotifications {
   static int _notificationBase(Task task, DateTime startLocal) {
     final key = '${task.title}|${task.startTime}|${task.period}|${startLocal.toIso8601String()}';
     return key.hashCode & 0x7fffffff;
+  }
+
+  static String _buildPayload(Task task, DateTime startLocal) {
+    final map = <String, dynamic>{
+      'title': task.title,
+      'startTime': task.startTime,
+      'period': task.period,
+      'familyTag': task.familyTag,
+      'startDate': startLocal.toIso8601String(),
+    };
+    return jsonEncode(map);
   }
 
   static String _saltLabel(int salt) {

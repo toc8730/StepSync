@@ -1,4 +1,5 @@
 // lib/pages/homepage.dart
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -17,11 +18,13 @@ import '../widgets/ai_prompt_dialog.dart';
 import '../widgets/task_tile.dart';
 import '../pages/task_detail_page.dart';
 import '../widgets/quick_actions.dart';
+import '../widgets/step_viewer_dialog.dart';
 import 'login_page.dart';
 import 'welcome_page.dart';
 import 'profile_page.dart';
 import 'routine_editor_page.dart';
 import '../services/routine_service.dart';
+import '../services/push_notifications.dart';
 
 class HomePage extends StatefulWidget {
   final String username;
@@ -41,6 +44,8 @@ class _HomePageState extends State<HomePage> {
   String? _childrenError;
   int _pendingLeaveRequests = 0;
   bool _isMasterParent = false;
+  StreamSubscription<String>? _notifSub;
+  String? _pendingNotificationPayload;
 
   @override
   void initState() {
@@ -48,6 +53,13 @@ class _HomePageState extends State<HomePage> {
     _ctrl = TaskController();
     _loadFromServer();
     _loadChildren();
+    _notifSub = PushNotifications.notificationTaps.listen(_handleNotificationTap);
+  }
+
+  @override
+  void dispose() {
+    _notifSub?.cancel();
+    super.dispose();
   }
 
   Map<String, String> get _jsonHeaders => {
@@ -82,6 +94,7 @@ class _HomePageState extends State<HomePage> {
         );
       }
       _ctrl.replaceAll(tasks);
+      _processPendingNotificationTap();
     } catch (e) {
       _toast('Load error: $e');
     }
@@ -94,6 +107,55 @@ class _HomePageState extends State<HomePage> {
     }
     final encoded = Uri.encodeComponent(target);
     return Uri.parse('$_base/profile?target_child=$encoded');
+  }
+
+  void _handleNotificationTap(String payload) {
+    if (!_showTaskFromPayload(payload)) {
+      _pendingNotificationPayload = payload;
+    }
+  }
+
+  void _processPendingNotificationTap() {
+    if (_pendingNotificationPayload == null) return;
+    final handled = _showTaskFromPayload(_pendingNotificationPayload!);
+    if (handled) {
+      _pendingNotificationPayload = null;
+    }
+  }
+
+  bool _showTaskFromPayload(String payload) {
+    Map<String, dynamic>? data;
+    try {
+      data = jsonDecode(payload) as Map<String, dynamic>?;
+    } catch (_) {
+      data = null;
+    }
+    if (data == null) return false;
+    final title = (data['title'] ?? '').toString();
+    final startTime = (data['startTime'] ?? '').toString();
+    final period = (data['period'] ?? '').toString().toUpperCase();
+    if (title.isEmpty) return false;
+    Task? target;
+    for (final task in _ctrl.all) {
+      if (_matchesNotificationTask(task, title, startTime, period)) {
+        target = task;
+        break;
+      }
+    }
+    if (target == null || !mounted) return false;
+    StepViewerDialog.show(
+      context,
+      task: target,
+      stepsWithImages: resolveTaskSteps(target),
+    );
+    return true;
+  }
+
+  bool _matchesNotificationTask(Task task, String title, String startTime, String period) {
+    if (task.title != title.trim()) return false;
+    if (startTime.isNotEmpty && (task.startTime ?? '') != startTime) return false;
+    if (period.isNotEmpty && (task.period ?? '').toUpperCase() != period) return false;
+    return true;
   }
 
   Map<String, dynamic> _taskToBlock(Task t) => <String, dynamic>{
