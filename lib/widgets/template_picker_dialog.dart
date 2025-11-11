@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../data/premade_templates.dart';
 import '../models/task.dart';
 import '../models/task_template.dart';
+import '../services/favorites_service.dart';
 import '../services/template_service.dart';
 import 'task_editor_dialog.dart';
 
@@ -34,11 +35,25 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
   String? _error;
   List<SavedTemplate> _personal = const <SavedTemplate>[];
   List<SavedTemplate> _family = const <SavedTemplate>[];
+  Set<String> _favoriteTemplateIds = const <String>{};
 
   @override
   void initState() {
     super.initState();
+    _loadFavorites();
     _loadTemplates();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final favs = await FavoritesService.fetchFavorites();
+      if (!mounted) return;
+      setState(() {
+        _favoriteTemplateIds = favs.templateIds;
+      });
+    } catch (_) {
+      // ignore fetch errors; hearts will stay empty
+    }
   }
 
   Future<void> _loadTemplates() async {
@@ -219,32 +234,57 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
   }
 
   List<_TemplateListItem> get _items {
-    final builtIn = kPremadeTemplates
-        .map((tmpl) => _TemplateListItem(
-              id: tmpl.id,
-              template: tmpl,
-              source: _TemplateSource.builtin,
-              canEdit: false,
-              canDelete: false,
-            ))
-        .toList();
-    final personal = _personal
-        .map((saved) => _TemplateListItem.fromSaved(saved, _TemplateSource.personal))
-        .toList();
-    final family = _family
-        .map((saved) => _TemplateListItem.fromSaved(saved, _TemplateSource.family))
-        .toList();
-    return [...builtIn, ...personal, ...family];
+    int order = 0;
+    final items = <_TemplateListItem>[];
+    for (final tmpl in kPremadeTemplates) {
+      items.add(
+        _TemplateListItem(
+          id: tmpl.id,
+          template: tmpl,
+          source: _TemplateSource.builtin,
+          canEdit: false,
+          canDelete: false,
+          order: order++,
+        ),
+      );
+    }
+    for (final saved in _personal) {
+      items.add(
+        _TemplateListItem.fromSaved(saved, _TemplateSource.personal, order++),
+      );
+    }
+    for (final saved in _family) {
+      items.add(
+        _TemplateListItem.fromSaved(saved, _TemplateSource.family, order++),
+      );
+    }
+    return items;
   }
 
   List<_TemplateListItem> get _filteredItems {
     final query = _query.trim().toLowerCase();
     final items = _items;
-    if (query.isEmpty) return items;
-    return items.where((item) {
+    final filtered = query.isEmpty
+        ? items
+        : items.where((item) {
       final haystack = (item.template.title + ' ' + item.template.steps.join(' ')).toLowerCase();
       return haystack.contains(query);
     }).toList();
+    return _sortByFavorites(filtered);
+  }
+
+  List<_TemplateListItem> _sortByFavorites(List<_TemplateListItem> items) {
+    final sorted = List<_TemplateListItem>.from(items);
+    final favs = _favoriteTemplateIds;
+    sorted.sort((a, b) {
+      final af = favs.contains(a.favoriteKey);
+      final bf = favs.contains(b.favoriteKey);
+      if (af == bf) {
+        return a.order.compareTo(b.order);
+      }
+      return af ? -1 : 1;
+    });
+    return sorted;
   }
 
   Future<void> _selectTemplate(TaskTemplate template) async {
@@ -252,9 +292,29 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
     final edited = await TaskEditorDialog.show(
       context,
       initial: initialTask,
+      primaryButtonLabel: 'Add',
     );
     if (!mounted) return;
     Navigator.of(context).pop<Task?>(edited);
+  }
+
+  Future<void> _toggleFavorite(_TemplateListItem item) async {
+    final key = item.favoriteKey;
+    final next = Set<String>.from(_favoriteTemplateIds);
+    if (next.contains(key)) {
+      next.remove(key);
+    } else {
+      next.add(key);
+    }
+    setState(() => _favoriteTemplateIds = next);
+    try {
+      final data = await FavoritesService.updateTemplates(next);
+      if (!mounted) return;
+      setState(() => _favoriteTemplateIds = data.templateIds);
+    } catch (e) {
+      _snack('Failed to update favorites: $e');
+      _loadFavorites();
+    }
   }
 
   Future<void> _deleteTemplate(_TemplateListItem item) async {
@@ -389,6 +449,20 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
                                           style: Theme.of(context).textTheme.labelSmall,
                                         ),
                                       ),
+                                    IconButton(
+                                      tooltip: _favoriteTemplateIds.contains(item.favoriteKey)
+                                          ? 'Unfavorite'
+                                          : 'Favorite',
+                                      icon: Icon(
+                                        _favoriteTemplateIds.contains(item.favoriteKey)
+                                            ? Icons.favorite
+                                            : Icons.favorite_border,
+                                        color: _favoriteTemplateIds.contains(item.favoriteKey)
+                                            ? Colors.pink
+                                            : null,
+                                      ),
+                                      onPressed: () => _toggleFavorite(item),
+                                    ),
                                     if (item.canEdit && item.id != null)
                                       IconButton(
                                         tooltip: 'Edit template',
@@ -447,15 +521,17 @@ class _TemplateListItem {
     required this.source,
     required this.canEdit,
     required this.canDelete,
-  });
+    required this.order,
+  }) : favoriteKey = _composeFavoriteKey(id, template, source);
 
-  factory _TemplateListItem.fromSaved(SavedTemplate saved, _TemplateSource source) {
+  factory _TemplateListItem.fromSaved(SavedTemplate saved, _TemplateSource source, int order) {
     return _TemplateListItem(
       id: saved.id,
       template: saved.template,
       source: source,
       canEdit: saved.canEdit,
       canDelete: saved.canDelete,
+      order: order,
     );
   }
 
@@ -464,6 +540,8 @@ class _TemplateListItem {
   final _TemplateSource source;
   final bool canEdit;
   final bool canDelete;
+  final int order;
+  final String favoriteKey;
 
   IconData get icon {
     switch (source) {
@@ -475,5 +553,15 @@ class _TemplateListItem {
       default:
         return Icons.auto_awesome;
     }
+  }
+
+  static String _composeFavoriteKey(String? id, TaskTemplate template, _TemplateSource source) {
+    final prefix = switch (source) {
+      _TemplateSource.personal => 'personal',
+      _TemplateSource.family => 'family',
+      _TemplateSource.builtin => 'builtin',
+    };
+    final base = (id != null && id.isNotEmpty) ? id : template.id;
+    return '$prefix:$base';
   }
 }

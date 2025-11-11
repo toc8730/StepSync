@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/premade_routines.dart';
 import '../models/routine_template.dart';
 import '../pages/routine_editor_page.dart';
+import '../services/favorites_service.dart';
 import '../services/routine_service.dart';
 
 class RoutinePickerDialog extends StatefulWidget {
@@ -25,11 +26,25 @@ class _RoutinePickerDialogState extends State<RoutinePickerDialog> {
   bool _loadingSaved = true;
   String? _error;
   List<RoutineTemplate> _saved = const [];
+  Set<String> _favoriteRoutineIds = const <String>{};
 
   @override
   void initState() {
     super.initState();
+    _loadFavorites();
     _loadSaved();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final favs = await FavoritesService.fetchFavorites();
+      if (!mounted) return;
+      setState(() {
+        _favoriteRoutineIds = favs.routineIds;
+      });
+    } catch (_) {
+      // Ignore failures; favorites can be retried later.
+    }
   }
 
   Future<void> _loadSaved() async {
@@ -55,15 +70,32 @@ class _RoutinePickerDialogState extends State<RoutinePickerDialog> {
 
   List<_RoutineItem> get _filteredRoutines {
     final q = _query.trim().toLowerCase();
+    int order = 0;
     final items = [
-      ..._saved.map((r) => _RoutineItem(template: r, isSaved: true)),
-      ...kPremadeRoutines.map((r) => _RoutineItem(template: r, isSaved: false)),
+      ..._saved.map((r) => _RoutineItem(template: r, isSaved: true, order: order++)),
+      ...kPremadeRoutines.map((r) => _RoutineItem(template: r, isSaved: false, order: order++)),
     ];
-    if (q.isEmpty) return items;
-    return items.where((item) {
+    final filtered = q.isEmpty
+        ? items
+        : items.where((item) {
       final haystack = (item.template.title + ' ' + item.template.description).toLowerCase();
       return haystack.contains(q);
     }).toList();
+    return _sortRoutines(filtered);
+  }
+
+  List<_RoutineItem> _sortRoutines(List<_RoutineItem> items) {
+    final favs = _favoriteRoutineIds;
+    final sorted = List<_RoutineItem>.from(items);
+    sorted.sort((a, b) {
+      final af = favs.contains(a.favoriteKey);
+      final bf = favs.contains(b.favoriteKey);
+      if (af == bf) {
+        return a.order.compareTo(b.order);
+      }
+      return af ? -1 : 1;
+    });
+    return sorted;
   }
 
   @override
@@ -138,6 +170,20 @@ class _RoutinePickerDialogState extends State<RoutinePickerDialog> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     IconButton(
+                                      tooltip: _favoriteRoutineIds.contains(item.favoriteKey)
+                                          ? 'Unfavorite'
+                                          : 'Favorite',
+                                      icon: Icon(
+                                        _favoriteRoutineIds.contains(item.favoriteKey)
+                                            ? Icons.favorite
+                                            : Icons.favorite_border,
+                                        color: _favoriteRoutineIds.contains(item.favoriteKey)
+                                            ? Colors.pink
+                                            : null,
+                                      ),
+                                      onPressed: () => _toggleRoutineFavorite(item),
+                                    ),
+                                    IconButton(
                                       tooltip: 'Deploy routine',
                                       icon: const Icon(Icons.rocket_launch_outlined),
                                       onPressed: () => _deployRoutine(item),
@@ -175,6 +221,27 @@ class _RoutinePickerDialogState extends State<RoutinePickerDialog> {
     final desc = routine.description.trim().isEmpty ? 'No description' : routine.description.trim();
     final tasks = routine.tasks.length;
     return '$desc · $tasks task${tasks == 1 ? '' : 's'}';
+  }
+
+  Future<void> _toggleRoutineFavorite(_RoutineItem item) async {
+    final key = item.favoriteKey;
+    final next = Set<String>.from(_favoriteRoutineIds);
+    if (next.contains(key)) {
+      next.remove(key);
+    } else {
+      next.add(key);
+    }
+    setState(() => _favoriteRoutineIds = next);
+    try {
+      final data = await FavoritesService.updateRoutines(next);
+      if (!mounted) return;
+      setState(() => _favoriteRoutineIds = data.routineIds);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update favorites: $e')),
+      );
+      await _loadFavorites();
+    }
   }
 
   Future<void> _openRoutine(_RoutineItem item) async {
@@ -300,7 +367,14 @@ class _RoutinePickerDialogState extends State<RoutinePickerDialog> {
 }
 
 class _RoutineItem {
-  const _RoutineItem({required this.template, required this.isSaved});
+  _RoutineItem({
+    required this.template,
+    required this.isSaved,
+    required this.order,
+  }) : favoriteKey = '${isSaved ? 'saved' : 'builtin'}:${template.id}';
+
   final RoutineTemplate template;
   final bool isSaved;
+  final int order;
+  final String favoriteKey;
 }

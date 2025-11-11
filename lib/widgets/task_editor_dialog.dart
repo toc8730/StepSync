@@ -6,16 +6,17 @@ import '../models/task.dart';
 import '../data/images_repo.dart';
 
 class TaskEditorDialog extends StatefulWidget {
-  const TaskEditorDialog({super.key, this.initial});
+  const TaskEditorDialog({super.key, this.initial, this.primaryButtonLabel = 'Save'});
   final Task? initial;
+  final String primaryButtonLabel;
 
-  static Future<Task?> show(BuildContext context, {Task? initial}) {
+  static Future<Task?> show(BuildContext context, {Task? initial, String primaryButtonLabel = 'Save'}) {
     return showDialog<Task?>(
       context: context,
       barrierDismissible: false,
       builder: (_) => Dialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-        child: TaskEditorDialog(initial: initial),
+        child: TaskEditorDialog(initial: initial, primaryButtonLabel: primaryButtonLabel),
       ),
     );
   }
@@ -465,7 +466,7 @@ class _TaskEditorDialogState extends State<TaskEditorDialog> {
                 Expanded(
                   child: FilledButton(
                     onPressed: _save,
-                    child: const Text('Save'),
+                    child: Text(widget.primaryButtonLabel),
                   ),
                 ),
               ],

@@ -151,11 +151,19 @@ def _default_preferences() -> dict:
 
 def _safe_profile_dict(text_json: str | None) -> dict:
     if not text_json:
-        return {"schedule_blocks": [], "preferences": _default_preferences()}
+        return {
+            "schedule_blocks": [],
+            "preferences": _default_preferences(),
+            "favorites": _default_favorites(),
+        }
     try:
         data = json.loads(text_json)
         if not isinstance(data, dict):
-            return {"schedule_blocks": [], "preferences": _default_preferences()}
+            return {
+                "schedule_blocks": [],
+                "preferences": _default_preferences(),
+                "favorites": _default_favorites(),
+            }
         if "schedule_blocks" not in data or not isinstance(data.get("schedule_blocks"), list):
             data["schedule_blocks"] = []
         if "preferences" not in data or not isinstance(data.get("preferences"), dict):
@@ -165,9 +173,50 @@ def _safe_profile_dict(text_json: str | None) -> dict:
             theme = (prefs.get("theme") or "").lower()
             if theme not in ("light", "dark", "system"):
                 prefs["theme"] = "system"
+        favs = data.get("favorites")
+        if not isinstance(favs, dict):
+            favs = _default_favorites()
+        else:
+            templates = favs.get("templates")
+            routines = favs.get("routines")
+            if not isinstance(templates, list):
+                templates = []
+            if not isinstance(routines, list):
+                routines = []
+            favs = {
+                "templates": [str(t) for t in templates if str(t).strip()],
+                "routines": [str(r) for r in routines if str(r).strip()],
+            }
+        data["favorites"] = favs
         return data
     except Exception:
-        return {"schedule_blocks": [], "preferences": _default_preferences()}
+        return {
+            "schedule_blocks": [],
+            "preferences": _default_preferences(),
+            "favorites": _default_favorites(),
+        }
+
+def _default_favorites() -> dict:
+    return {"templates": [], "routines": []}
+
+def _user_favorites(user: 'User') -> dict:
+    prof = _safe_profile_dict(user.profile_data)
+    favs = prof.get("favorites") or _default_favorites()
+    return {
+        "templates": [str(t) for t in favs.get("templates", []) if str(t).strip()],
+        "routines": [str(r) for r in favs.get("routines", []) if str(r).strip()],
+    }
+
+def _update_user_favorites(user: 'User', *, templates: list[str] | None = None, routines: list[str] | None = None) -> dict:
+    prof = _safe_profile_dict(user.profile_data)
+    favs = prof.get("favorites") or _default_favorites()
+    if templates is not None:
+        favs["templates"] = [str(t) for t in templates if str(t).strip()]
+    if routines is not None:
+        favs["routines"] = [str(r) for r in routines if str(r).strip()]
+    prof["favorites"] = favs
+    user.profile_data = json.dumps(prof)
+    return favs.copy()
 
 def _rand_family_id(n: int = 10) -> str:
     alphabet = string.ascii_letters + string.digits
@@ -1735,6 +1784,44 @@ def profile_preferences():
     user.profile_data = json.dumps(prof)
     db.session.commit()
     return jsonify({"preferences": prefs}), 200
+
+@app.route("/favorites", methods=["GET", "POST"])
+@jwt_required()
+def favorites():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    if request.method == "GET":
+        return jsonify(_user_favorites(user)), 200
+
+    payload = request.get_json(silent=True) or {}
+
+    def _normalize_list(value):
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("Favorites must be a list of strings.")
+        cleaned = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+    try:
+        templates_norm = _normalize_list(payload.get("templates"))
+        routines_norm = _normalize_list(payload.get("routines"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        favs = _update_user_favorites(user, templates=templates_norm, routines=routines_norm)
+        db.session.commit()
+        return jsonify(favs), 200
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to update favorites: {exc}"}), 500
 
 # -------------------- AI Task Generation --------------------
 @app.route("/ai/tasks", methods=["POST"])
