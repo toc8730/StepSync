@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'theme_controller.dart';
 import 'pages/welcome_page.dart';
+import 'services/push_notifications.dart';
 
 // Your firebase_options.dart is inside /lib/pages in this project.
 import 'firebase_options.dart';
@@ -17,6 +18,8 @@ void main() {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    await PushNotifications.init();
 
     runApp(const MyApp());
   }, (error, stack) {

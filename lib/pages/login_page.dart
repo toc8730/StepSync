@@ -321,19 +321,14 @@ class _LoginPageState extends State<LoginPage> {
     ThemeController.instance.applyPreference(parseThemePreference(pref));
 
     if (!mounted) return;
-    if (role == 'child') {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => ChildHomePage(username: username, token: token),
-        ),
-      );
-    } else {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => HomePage(username: username, token: token),
-        ),
-      );
-    }
+    final route = (role == 'child')
+        ? MaterialPageRoute(
+            builder: (_) => ChildHomePage(username: username, token: token),
+          )
+        : MaterialPageRoute(
+            builder: (_) => HomePage(username: username, token: token),
+          );
+    Navigator.of(context).pushAndRemoveUntil(route, (r) => false);
   }
 
   @override
