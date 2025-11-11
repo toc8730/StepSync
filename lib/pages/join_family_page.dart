@@ -58,7 +58,8 @@ class _JoinFamilyPageState extends State<JoinFamilyPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Joined family successfully')),
       );
-      if (mounted) Navigator.pop(context);
+      AppGlobals.notifyScheduleRefresh();
+      if (mounted) Navigator.pop(context, true);
     } else {
       final error = jsonDecode(response.body)['error'] ?? 'Unknown error';
       ScaffoldMessenger.of(context).showSnackBar(

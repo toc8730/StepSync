@@ -215,6 +215,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (accept) {
         await _fetchProfile();
         await _loadFamilyMembers();
+        AppGlobals.notifyScheduleRefresh();
         _showSnack('Joined ${invite.familyName}.');
       } else {
         _showSnack('Invite declined.');

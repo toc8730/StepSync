@@ -65,6 +65,7 @@ Task _cloneTask(Task task) {
     hidden: task.hidden,
     completed: task.completed,
     familyTag: task.familyTag,
+    scheduledDate: task.scheduledDate,
   );
 }
 
@@ -78,6 +79,7 @@ Map<String, dynamic> _taskToJson(Task task) {
     'hidden': task.hidden,
     'completed': task.completed,
     'familyTag': task.familyTag,
+    'scheduledDate': task.scheduledDate,
   };
 }
 
@@ -93,5 +95,6 @@ Task _taskFromJson(Map<String, dynamic> json) {
     hidden: json['hidden'] == true,
     completed: json['completed'] == true,
     familyTag: (json['familyTag'] ?? '').toString().isEmpty ? null : json['familyTag'] as String,
+    scheduledDate: (json['scheduledDate'] ?? '').toString().isEmpty ? null : json['scheduledDate'] as String,
   );
 }

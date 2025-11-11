@@ -320,7 +320,10 @@ class PushNotifications {
   }
 
   static int _notificationBase(Task task, DateTime startLocal) {
-    final key = '${task.title}|${task.startTime}|${task.period}|${startLocal.toIso8601String()}';
+    final dateKey = (task.scheduledDate ?? '').isEmpty
+        ? DateTime.now().toIso8601String().split('T').first
+        : task.scheduledDate!;
+    final key = '${task.title}|${task.startTime}|${task.period}|$dateKey|${startLocal.toIso8601String()}';
     return key.hashCode & 0x7fffffff;
   }
 
@@ -331,6 +334,7 @@ class PushNotifications {
       'period': task.period,
       'familyTag': task.familyTag,
       'startDate': startLocal.toIso8601String(),
+      'scheduledDate': task.scheduledDate,
     };
     return jsonEncode(map);
   }

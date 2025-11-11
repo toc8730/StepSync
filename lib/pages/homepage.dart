@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import 'package:my_app/config/backend_config.dart';
 import 'package:my_app/data/globals.dart';
@@ -39,6 +40,7 @@ class _HomePageState extends State<HomePage> {
   late final TaskController _ctrl;
   static const _base = BackendConfig.baseUrl;
   String? _selectedChild;
+  late DateTime _selectedDate;
   List<FamilyMember> _children = const <FamilyMember>[];
   bool _childrenLoading = false;
   String? _childrenError;
@@ -46,19 +48,30 @@ class _HomePageState extends State<HomePage> {
   bool _isMasterParent = false;
   StreamSubscription<String>? _notifSub;
   String? _pendingNotificationPayload;
+  late VoidCallback _scheduleListener;
+
+  String get _selectedDateIso => DateFormat('yyyy-MM-dd').format(_selectedDate);
 
   @override
   void initState() {
     super.initState();
     _ctrl = TaskController();
+    _selectedDate = DateTime.now();
     _loadFromServer();
     _loadChildren();
     _notifSub = PushNotifications.notificationTaps.listen(_handleNotificationTap);
+    _scheduleListener = () {
+      if (mounted) {
+        _loadFromServer();
+      }
+    };
+    AppGlobals.scheduleVersion.addListener(_scheduleListener);
   }
 
   @override
   void dispose() {
     _notifSub?.cancel();
+    AppGlobals.scheduleVersion.removeListener(_scheduleListener);
     super.dispose();
   }
 
@@ -77,9 +90,19 @@ class _HomePageState extends State<HomePage> {
       }
       final body = json.decode(res.body) as Map<String, dynamic>;
       final blocks = (body['schedule_blocks'] as List? ?? const []);
+      final serverDate = (body['selected_date'] ?? '').toString();
+      if (serverDate.isNotEmpty) {
+        final parsed = DateTime.tryParse(serverDate);
+        if (parsed != null && !_isSameDay(parsed, _selectedDate)) {
+          setState(() {
+            _selectedDate = parsed;
+          });
+        }
+      }
       final tasks = <Task>[];
       for (final b in blocks) {
         final m = (b as Map).cast<String, dynamic>();
+        final dateString = (m['date'] ?? '').toString();
         tasks.add(
           Task(
             title: (m['title'] ?? '').toString(),
@@ -90,10 +113,12 @@ class _HomePageState extends State<HomePage> {
             hidden: (m['hidden'] is bool) ? m['hidden'] as bool : false,
             completed: (m['completed'] is bool) ? m['completed'] as bool : false,
             familyTag: ((m['family_tag'] ?? '').toString().isEmpty ? null : m['family_tag'].toString()),
+            scheduledDate: dateString.isEmpty ? _selectedDateIso : dateString,
           ),
         );
       }
-      _ctrl.replaceAll(tasks);
+      final shouldSchedule = _isSameDay(_selectedDate, DateTime.now());
+      _ctrl.replaceAll(tasks, reschedule: shouldSchedule);
       _processPendingNotificationTap();
     } catch (e) {
       _toast('Load error: $e');
@@ -101,18 +126,28 @@ class _HomePageState extends State<HomePage> {
   }
 
   Uri _buildProfileUri() {
-    final target = _selectedChild;
-    if (target == null || target.isEmpty) {
-      return Uri.parse('$_base/profile');
+    final params = <String, String>{'date': _selectedDateIso};
+    if (_selectedChild != null && _selectedChild!.isNotEmpty) {
+      params['target_child'] = _selectedChild!;
     }
-    final encoded = Uri.encodeComponent(target);
-    return Uri.parse('$_base/profile?target_child=$encoded');
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    return Uri.parse('$_base/profile${query.isEmpty ? '' : '?$query'}');
   }
 
   void _handleNotificationTap(String payload) {
     if (!_showTaskFromPayload(payload)) {
       _pendingNotificationPayload = payload;
     }
+  }
+
+  void _onDateSelected(DateTime date) {
+    if (_isSameDay(date, _selectedDate)) return;
+    setState(() {
+      _selectedDate = DateTime(date.year, date.month, date.day);
+    });
+    _loadFromServer();
   }
 
   void _processPendingNotificationTap() {
@@ -134,6 +169,15 @@ class _HomePageState extends State<HomePage> {
     final title = (data['title'] ?? '').toString();
     final startTime = (data['startTime'] ?? '').toString();
     final period = (data['period'] ?? '').toString().toUpperCase();
+    final scheduledDate = (data['scheduledDate'] ?? '').toString();
+    if (scheduledDate.isNotEmpty && scheduledDate != _selectedDateIso) {
+      final parsed = DateTime.tryParse(scheduledDate);
+      if (parsed != null) {
+        _pendingNotificationPayload = payload;
+        _onDateSelected(parsed);
+        return false;
+      }
+    }
     if (title.isEmpty) return false;
     Task? target;
     for (final task in _ctrl.all) {
@@ -158,6 +202,46 @@ class _HomePageState extends State<HomePage> {
     return true;
   }
 
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _friendlyDate(DateTime date) {
+    final now = DateTime.now();
+    if (_isSameDay(date, now)) {
+      return 'Today · ${DateFormat('MMM d').format(date)}';
+    }
+    if (_isSameDay(date, now.add(const Duration(days: 1)))) {
+      return 'Tomorrow · ${DateFormat('MMM d').format(date)}';
+    }
+    return DateFormat('EEE · MMM d').format(date);
+  }
+
+  List<DateTime> _buildMonthCells(DateTime month, {DateTime? minDate}) {
+    final firstDay = DateTime(month.year, month.month, 1);
+    final firstWeekday = firstDay.weekday % 7; // make Sunday = 0
+    final daysInMonth = DateUtils.getDaysInMonth(month.year, month.month);
+    const totalCells = 42; // 6 weeks
+    final cells = <DateTime>[];
+    for (int i = 0; i < totalCells; i++) {
+      final dayOffset = i - firstWeekday;
+      final cellDate = DateTime(month.year, month.month, 1 + dayOffset);
+      cells.add(cellDate);
+    }
+    if (minDate == null) return cells;
+    final rows = <List<DateTime>>[];
+    for (int i = 0; i < cells.length; i += 7) {
+      rows.add(cells.sublist(i, i + 7));
+    }
+    while (rows.isNotEmpty && rows.first.every((d) => d.isBefore(minDate))) {
+      rows.removeAt(0);
+    }
+    if (rows.length > 5) {
+      rows.removeRange(5, rows.length);
+    }
+    return rows.expand((row) => row).toList();
+  }
+
   Map<String, dynamic> _taskToBlock(Task t) => <String, dynamic>{
         'title': t.title,
         'startTime': t.startTime,
@@ -167,10 +251,13 @@ class _HomePageState extends State<HomePage> {
         'hidden': t.hidden,
         'completed': t.completed,
         'family_tag': t.familyTag,
+        'date': t.scheduledDate ?? _selectedDateIso,
       };
 
   Future<bool> _serverAdd(Task t) async {
     try {
+      final date = t.scheduledDate ?? _selectedDateIso;
+      t.scheduledDate = date;
       final res = await http.post(
         Uri.parse('$_base/profile/block/add'),
         headers: _jsonHeaders,
@@ -178,6 +265,8 @@ class _HomePageState extends State<HomePage> {
           _withTarget(
             {'block': _taskToBlock(t)},
             forFamily: _isFamilyMode,
+            familyTag: t.familyTag,
+            date: date,
           ),
         ),
       );
@@ -204,6 +293,8 @@ class _HomePageState extends State<HomePage> {
   Future<void> _serverEdit(Task oldT, Task newT) async {
     final forFamily = _isFamilyMode && (oldT.familyTag?.isNotEmpty ?? false);
     try {
+      final oldDate = oldT.scheduledDate ?? _selectedDateIso;
+      final newDate = newT.scheduledDate ?? _selectedDateIso;
       final res = await http.post(
         Uri.parse('$_base/profile/block/edit'),
         headers: _jsonHeaders,
@@ -212,9 +303,11 @@ class _HomePageState extends State<HomePage> {
             {
               'old_block': _taskToBlock(oldT),
               'new_block': _taskToBlock(newT),
+              'new_date': newDate,
             },
             forFamily: forFamily,
             familyTag: oldT.familyTag,
+            date: oldDate,
           ),
         ),
       );
@@ -235,6 +328,7 @@ class _HomePageState extends State<HomePage> {
             {'block': _taskToBlock(t)},
             forFamily: forFamily,
             familyTag: t.familyTag,
+            date: t.scheduledDate ?? _selectedDateIso,
           ),
         ),
       );
@@ -296,6 +390,7 @@ class _HomePageState extends State<HomePage> {
     Map<String, dynamic> payload, {
     bool forFamily = false,
     String? familyTag,
+    String? date,
   }) {
     final map = Map<String, dynamic>.from(payload);
     final tagInPayload = (familyTag ?? _extractFamilyTag(map))?.trim();
@@ -307,6 +402,9 @@ class _HomePageState extends State<HomePage> {
       }
     } else if (_selectedChild != null && _selectedChild!.isNotEmpty) {
       map['target_child'] = _selectedChild;
+    }
+    if (date != null && date.isNotEmpty) {
+      map['date'] = date;
     }
     return map;
   }
@@ -359,8 +457,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _addTask() async {
-    final Task? task = await TaskEditorDialog.show(context);
+    final Task? task = await TaskEditorDialog.show(
+      context,
+      primaryButtonLabel: 'Save',
+    );
     if (task != null && mounted) {
+      task.scheduledDate ??= _selectedDateIso;
       setState(() => _ctrl.add(task));
       final ok = await _serverAdd(task);
       if (!ok) await _loadFromServer();
@@ -374,6 +476,7 @@ class _HomePageState extends State<HomePage> {
       canShareWithFamily: _isMasterParent,
     );
     if (templated != null && mounted) {
+      templated.scheduledDate = _selectedDateIso;
       setState(() => _ctrl.add(templated));
       final ok = await _serverAdd(templated);
       if (!ok) await _loadFromServer();
@@ -405,6 +508,7 @@ class _HomePageState extends State<HomePage> {
       case RoutineEditorOutcome.deploy:
         setState(() {
           for (final t in result.tasks) {
+            t.scheduledDate ??= _selectedDateIso;
             _ctrl.add(t);
           }
         });
@@ -416,10 +520,15 @@ class _HomePageState extends State<HomePage> {
         break;
       case RoutineEditorOutcome.saveRoutine:
         try {
+          final sanitized = result.tasks.map((task) {
+            final copy = _cloneTask(task);
+            copy.scheduledDate = null;
+            return copy;
+          }).toList();
           await RoutineService.saveRoutine(
             routineId: result.routineId,
             title: result.name,
-            tasks: result.tasks,
+            tasks: sanitized,
           );
           _snack('Saved routine "${result.name}".');
         } catch (e) {
@@ -487,6 +596,8 @@ class _HomePageState extends State<HomePage> {
       body: Column(
         children: [
           if (_pendingLeaveRequests > 0) _leaveRequestsBanner(),
+          _dateSelectionRow(),
+          const SizedBox(height: 8),
           _assignmentBanner(),
           const SizedBox(height: 8),
           _quickActions(context),
@@ -527,6 +638,133 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _dateSelectionRow() {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Selected day', style: theme.textTheme.labelSmall),
+                Text(
+                  _friendlyDate(_selectedDate),
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+          IconButton.filledTonal(
+            tooltip: 'Pick a date',
+            icon: const Icon(Icons.calendar_month),
+            onPressed: _showDatePickerSheet,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDatePickerSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        DateTime visibleMonth = DateTime(_selectedDate.year, _selectedDate.month);
+        final today = DateTime.now();
+        final todayFloor = DateTime(today.year, today.month, today.day);
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final days = _buildMonthCells(visibleMonth, minDate: todayFloor);
+            final theme = Theme.of(context);
+            final canGoPrev = !(visibleMonth.year == today.year && visibleMonth.month == today.month);
+            return SafeArea(
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.6,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.chevron_left),
+                        onPressed: canGoPrev
+                            ? () {
+                                setModalState(() {
+                                  visibleMonth = DateTime(visibleMonth.year, visibleMonth.month - 1);
+                                });
+                              }
+                            : null,
+                      ),
+                      Column(
+                        children: [
+                          Text(DateFormat('MMMM yyyy').format(visibleMonth),
+                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 4),
+                          Text('Tap a future day to assign tasks',
+                              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right),
+                        onPressed: () {
+                          setModalState(() {
+                            visibleMonth = DateTime(visibleMonth.year, visibleMonth.month + 1);
+                          });
+                        },
+                      ),
+                    ],
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: GridView.builder(
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: days.length,
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 7,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 8,
+                            childAspectRatio: 1,
+                          ),
+                          itemBuilder: (context, index) {
+                            final cell = days[index];
+                            final isPast = cell.isBefore(todayFloor);
+                            final isSelected = _isSameDay(cell, _selectedDate);
+                            final isCurrentMonth = cell.month == visibleMonth.month;
+                            return _CalendarCell(
+                              date: cell,
+                              enabled: !isPast && isCurrentMonth,
+                              selected: isSelected,
+                              highlightAsCurrentMonth: isCurrentMonth,
+                              onTap: (!isPast && isCurrentMonth)
+                                  ? () {
+                                      Navigator.of(context).pop();
+                                      _onDateSelected(cell);
+                                    }
+                                  : null,
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _assignmentBanner() {
     return Container(
       width: double.infinity,
@@ -541,6 +779,10 @@ class _HomePageState extends State<HomePage> {
           Text(
             "You're currently assigning tasks to $_assigneeLabel",
             style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          Text(
+            'Selected date: ${_friendlyDate(_selectedDate)}',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
           if (_childrenLoading)
@@ -662,8 +904,80 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  bool get _isFamilyMode => _children.isNotEmpty && (_selectedChild == null || _selectedChild!.isEmpty);
-  bool get _canAssign => true;
+bool get _isFamilyMode => _children.isNotEmpty && (_selectedChild == null || _selectedChild!.isEmpty);
+bool get _canAssign => true;
+}
+
+class _CalendarCell extends StatefulWidget {
+  const _CalendarCell({
+    required this.date,
+    required this.enabled,
+    required this.selected,
+    required this.highlightAsCurrentMonth,
+    this.onTap,
+  });
+
+  final DateTime date;
+  final bool enabled;
+  final bool selected;
+  final bool highlightAsCurrentMonth;
+  final VoidCallback? onTap;
+
+  @override
+  State<_CalendarCell> createState() => _CalendarCellState();
+}
+
+class _CalendarCellState extends State<_CalendarCell> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bg = widget.selected
+        ? theme.colorScheme.primary
+        : (widget.enabled ? theme.colorScheme.surface : theme.colorScheme.surfaceContainerHighest);
+    final fg = widget.selected
+        ? theme.colorScheme.onPrimary
+        : widget.enabled
+            ? widget.highlightAsCurrentMonth
+                ? theme.colorScheme.onSurface
+                : theme.colorScheme.onSurfaceVariant
+            : theme.disabledColor;
+    final borderColor = widget.selected
+        ? theme.colorScheme.primary
+        : _hovering && widget.enabled
+            ? theme.colorScheme.primary.withOpacity(0.6)
+            : theme.dividerColor;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: widget.enabled ? widget.onTap : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: _hovering && widget.enabled ? 2 : 1),
+            boxShadow: _hovering && widget.enabled
+                ? [
+                    BoxShadow(
+                      color: theme.colorScheme.primary.withOpacity(0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : const [],
+          ),
+          child: Text(
+            widget.date.day.toString(),
+            style: theme.textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ParentTasksSectionWithSync extends StatelessWidget {
@@ -789,6 +1103,7 @@ class _ParentTasksSectionWithSync extends StatelessWidget {
     final before = ctrl.all[idx];
     final edited = await TaskEditorDialog.show(context, initial: t);
     if (edited != null) {
+      edited.scheduledDate ??= before.scheduledDate;
       ctrl.update(idx, edited);
       onEdited(before, edited);
     }
@@ -812,4 +1127,5 @@ Task _cloneTask(Task t) => Task(
       hidden: t.hidden,
       completed: t.completed,
       familyTag: t.familyTag,
+      scheduledDate: t.scheduledDate,
     );

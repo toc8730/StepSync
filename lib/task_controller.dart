@@ -51,15 +51,21 @@ class TaskController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void replaceAll(List<Task> tasks) {
-    for (final task in _tasks) {
-      _cancelFor(task);
-    }
-    _tasks
-      ..clear()
-      ..addAll(tasks);
-    for (final task in _tasks) {
-      _scheduleFor(task);
+  void replaceAll(List<Task> tasks, {bool reschedule = true}) {
+    if (reschedule) {
+      for (final task in _tasks) {
+        _cancelFor(task);
+      }
+      _tasks
+        ..clear()
+        ..addAll(tasks);
+      for (final task in _tasks) {
+        _scheduleFor(task);
+      }
+    } else {
+      _tasks
+        ..clear()
+        ..addAll(tasks);
     }
     notifyListeners();
   }
@@ -107,6 +113,7 @@ class TaskController extends ChangeNotifier {
   void _scheduleFor(Task t) {
     if (!enableScheduling) return;
     if (t.hidden || t.completed) return;
+    if (!_isForToday(t)) return;
     final now = DateTime.now();
     final dt = _startDateTime(t, now);
     if (dt == null) return;
@@ -118,11 +125,19 @@ class TaskController extends ChangeNotifier {
 
   void _cancelFor(Task t) {
     if (!enableScheduling) return;
+    if (!_isForToday(t)) return;
     final now = DateTime.now();
     final dt = _startDateTime(t, now);
     if (dt != null) {
       PushNotifications.cancelTaskReminders(t, dt);
     }
+  }
+
+  bool _isForToday(Task t) {
+    final date = (t.scheduledDate ?? '').trim();
+    if (date.isEmpty) return true;
+    final today = DateTime.now().toIso8601String().split('T').first;
+    return date == today;
   }
 
   // =========================
@@ -164,7 +179,14 @@ class TaskController extends ChangeNotifier {
     final minute = int.parse(parts[1]);       // 00..59
     int hour24 = hour12 % 12;                 // 12 -> 0
     if (period == 'PM') hour24 += 12;         // PM -> +12
-
-    return DateTime(anchor.year, anchor.month, anchor.day, hour24, minute);
+    DateTime base = DateTime(anchor.year, anchor.month, anchor.day);
+    final dateStr = (t.scheduledDate ?? '').trim();
+    if (dateStr.isNotEmpty) {
+      final parsed = DateTime.tryParse(dateStr);
+      if (parsed != null) {
+        base = DateTime(parsed.year, parsed.month, parsed.day);
+      }
+    }
+    return DateTime(base.year, base.month, base.day, hour24, minute);
   }
 }

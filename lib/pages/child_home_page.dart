@@ -35,6 +35,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
   String? _invitesError;
   StreamSubscription<String>? _notifSub;
   String? _pendingNotificationPayload;
+  late VoidCallback _scheduleListener;
 
   @override
   void initState() {
@@ -43,11 +44,16 @@ class _ChildHomePageState extends State<ChildHomePage> {
     _loadFromServer();
     _loadInvites();
     _notifSub = PushNotifications.notificationTaps.listen(_handleNotificationTap);
+    _scheduleListener = () {
+      if (mounted) _loadFromServer();
+    };
+    AppGlobals.scheduleVersion.addListener(_scheduleListener);
   }
 
   @override
   void dispose() {
     _notifSub?.cancel();
+    AppGlobals.scheduleVersion.removeListener(_scheduleListener);
     super.dispose();
   }
 
@@ -68,6 +74,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
       final tasks = <Task>[];
       for (final b in blocks) {
         final m = (b as Map).cast<String, dynamic>();
+        final dateString = (m['date'] ?? '').toString();
         tasks.add(
           Task(
             title: (m['title'] ?? '').toString(),
@@ -78,6 +85,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
             hidden: (m['hidden'] is bool) ? m['hidden'] as bool : false,
             completed: (m['completed'] is bool) ? m['completed'] as bool : false,
             familyTag: ((m['family_tag'] ?? '').toString().isEmpty ? null : m['family_tag'].toString()),
+            scheduledDate: dateString.isEmpty ? null : dateString,
           ),
         );
       }
@@ -164,7 +172,11 @@ class _ChildHomePageState extends State<ChildHomePage> {
       final res = await http.post(
         Uri.parse('$_base/profile/block/edit'),
         headers: _jsonHeaders,
-        body: json.encode({'old_block': _taskToBlock(before), 'new_block': _taskToBlock(after)}),
+        body: json.encode({
+          'old_block': _taskToBlock(before),
+          'new_block': _taskToBlock(after),
+          'date': before.scheduledDate,
+        }),
       );
       if (res.statusCode != 200) _toast('Server toggle failed (${res.statusCode})');
     } catch (e) {
@@ -181,6 +193,7 @@ class _ChildHomePageState extends State<ChildHomePage> {
         'hidden': t.hidden,
         'completed': t.completed,
         'family_tag': t.familyTag,
+        'date': t.scheduledDate,
       };
 
   Future<void> _handleMenuSelect(String value) async {

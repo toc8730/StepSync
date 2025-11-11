@@ -8,6 +8,7 @@ class Task {
     this.hidden = false,
     this.completed = false,
     this.familyTag,
+    this.scheduledDate,
   });
 
   String title;
@@ -18,4 +19,5 @@ class Task {
   bool hidden;
   bool completed;
   String? familyTag;
+  String? scheduledDate; // YYYY-MM-DD
 }

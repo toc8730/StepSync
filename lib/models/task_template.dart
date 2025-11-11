@@ -31,6 +31,7 @@ class TaskTemplate {
       period: period ?? 'AM',
       completed: false,
       hidden: false,
+      scheduledDate: null,
     );
   }
 

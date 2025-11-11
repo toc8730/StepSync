@@ -6,7 +6,7 @@ from flask_jwt_extended import (
 )
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import inspect, text
 import re
 import json
@@ -149,6 +149,23 @@ with app.app_context():
 def _default_preferences() -> dict:
     return {"theme": "system"}
 
+def _today_iso() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+def _coerce_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+        return parsed.isoformat()
+    except ValueError:
+        return None
+
+def _require_not_past(date_str: str) -> None:
+    today = datetime.now(timezone.utc).date()
+    if datetime.strptime(date_str, "%Y-%m-%d").date() < today:
+        raise ValueError("Date must not be in the past.")
+
 def _safe_profile_dict(text_json: str | None) -> dict:
     if not text_json:
         return {
@@ -164,8 +181,18 @@ def _safe_profile_dict(text_json: str | None) -> dict:
                 "preferences": _default_preferences(),
                 "favorites": _default_favorites(),
             }
-        if "schedule_blocks" not in data or not isinstance(data.get("schedule_blocks"), list):
-            data["schedule_blocks"] = []
+        blocks = data.get("schedule_blocks")
+        if not isinstance(blocks, list):
+            blocks = []
+        sanitized_blocks = []
+        for raw in blocks:
+            blk = raw if isinstance(raw, dict) else {}
+            date_str = _coerce_date(blk.get("date"))
+            if not date_str:
+                date_str = _today_iso()
+            blk["date"] = date_str
+            sanitized_blocks.append(blk)
+        data["schedule_blocks"] = sanitized_blocks
         if "preferences" not in data or not isinstance(data.get("preferences"), dict):
             data["preferences"] = _default_preferences()
         else:
@@ -507,13 +534,20 @@ def _update_block_with_tag(user: 'User', tag: str, new_block: dict) -> bool:
         user.profile_data = json.dumps(prof)
     return updated
 
-def _remove_family_tag_from_user(user: 'User', tag: str) -> bool:
+def _remove_family_tag_from_user(user: 'User', tag: str, date_str: str | None = None) -> bool:
     tag = (tag or "").strip()
     if not tag:
         return False
+    date_str = _coerce_date(date_str) or _today_iso()
     prof = _safe_profile_dict(user.profile_data)
     blocks = prof["schedule_blocks"]
-    new_blocks = [b for b in blocks if (b.get("family_tag") or "").strip() != tag]
+    new_blocks = [
+        b for b in blocks
+        if not (
+            (b.get("family_tag") or "").strip() == tag and
+            (b.get("date") or _today_iso()) == date_str
+        )
+    ]
     if len(new_blocks) == len(blocks):
         return False
     prof["schedule_blocks"] = new_blocks
@@ -652,6 +686,7 @@ def _norm_block(b: dict | None) -> dict:
         steps = [s(x) for x in steps if isinstance(x, str)]
     else:
         steps = []
+    date_val = _coerce_date(b.get("date")) or _today_iso()
     return {
         "title": s(b.get("title")),
         "startTime": s(b.get("startTime")),
@@ -661,6 +696,7 @@ def _norm_block(b: dict | None) -> dict:
         "hidden": bool(b.get("hidden", False)),
         "completed": bool(b.get("completed", False)),
         "family_tag": s(b.get("family_tag")),
+        "date": date_val,
     }
 
 def _first_match_index(blocks: list, cand: dict) -> int:
@@ -1139,12 +1175,22 @@ def profile_get():
     if not user:
         return jsonify({"error": "User not found"}), 404
     target_child = request.args.get("target_child")
+    requested_date = _coerce_date(request.args.get("date"))
+    if not requested_date:
+        requested_date = _today_iso()
     try:
         schedule_user = _resolve_schedule_user(user, target_child)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-
-    return jsonify(_safe_profile_dict(schedule_user.profile_data)), 200
+    profile = _safe_profile_dict(schedule_user.profile_data)
+    blocks = [
+        blk
+        for blk in profile["schedule_blocks"]
+        if (blk.get("date") or _today_iso()) == requested_date
+    ]
+    profile["schedule_blocks"] = blocks
+    profile["selected_date"] = requested_date
+    return jsonify(profile), 200
 
 # get the profile of the head of the family (used for saving blocks from the parent to the child account)
 @app.route("/profile/family", methods=["GET"])
@@ -1363,6 +1409,12 @@ def block_add():
     if not isinstance(block_payload, dict):
         return jsonify({"error": "Missing 'block'"}), 400
 
+    desired_date = _coerce_date(payload.get("date")) or _coerce_date(block_payload.get("date")) or _today_iso()
+    try:
+        _require_not_past(desired_date)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     apply_family = bool(payload.get("apply_to_family"))
     if apply_family:
         family = _family_for_user(user)
@@ -1374,6 +1426,7 @@ def block_add():
         family_tag = (payload.get("family_tag") or "").strip() or f"fam-{secrets.token_hex(8)}"
         normalized = _norm_block(block_payload)
         normalized["family_tag"] = family_tag
+        normalized["date"] = desired_date
         owner, _ = _schedule_owner(user)
         _append_block_to_user(owner, normalized)
         for child in children:
@@ -1387,7 +1440,9 @@ def block_add():
         return jsonify({"error": str(exc)}), 400
 
     prof = _safe_profile_dict(schedule_user.profile_data)
-    prof["schedule_blocks"].append(_norm_block(block_payload))
+    norm = _norm_block(block_payload)
+    norm["date"] = desired_date
+    prof["schedule_blocks"].append(norm)
     schedule_user.profile_data = json.dumps(prof)
     db.session.commit()
     return jsonify({"message": "Block add successful"}), 200
@@ -1406,6 +1461,13 @@ def block_edit():
     if old_block is None or new_block is None:
         return jsonify({"error": "Missing 'old_block' or 'new_block'"}), 400
 
+    old_date = _coerce_date(payload.get("date")) or _coerce_date(old_block.get("date")) or _today_iso()
+    new_date = _coerce_date(payload.get("new_date")) or _coerce_date(new_block.get("date")) or old_date
+    try:
+        _require_not_past(new_date)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     if payload.get("apply_to_family"):
         family = _family_for_user(user)
         if not family:
@@ -1419,6 +1481,7 @@ def block_edit():
             return jsonify({"error": "Family task identifier missing"}), 400
         normalized = _norm_block(new_block)
         normalized["family_tag"] = tag
+        normalized["date"] = new_date
         owner, _ = _schedule_owner(user)
         changed = _update_block_with_tag(owner, tag, normalized)
         for child in _family_children(family):
@@ -1434,11 +1497,15 @@ def block_edit():
         return jsonify({"error": str(exc)}), 400
 
     prof = _safe_profile_dict(schedule_user.profile_data)
+    old_block = dict(old_block)
+    old_block["date"] = old_date
     idx = _first_match_index(prof["schedule_blocks"], old_block)
     if idx < 0:
         return jsonify({"error": "Old block not found"}), 404
 
-    prof["schedule_blocks"][idx] = _norm_block(new_block)
+    new_norm = _norm_block(new_block)
+    new_norm["date"] = new_date
+    prof["schedule_blocks"][idx] = new_norm
     schedule_user.profile_data = json.dumps(prof)
     db.session.commit()
     return jsonify({"message": "Block edit successful"}), 200
@@ -1456,6 +1523,7 @@ def block_delete():
         return jsonify({"error": "Children cannot delete tasks"}), 403
 
     payload = request.get_json(silent=True) or {}
+    date_str = _coerce_date(payload.get("date")) or _today_iso()
     if bool(payload.get("apply_to_family")):
         family = _family_for_user(user)
         if not family:
@@ -1466,9 +1534,9 @@ def block_delete():
         if not tag:
             return jsonify({"error": "Family task identifier missing"}), 400
         owner, _ = _schedule_owner(user)
-        changed = _remove_family_tag_from_user(owner, tag)
+        changed = _remove_family_tag_from_user(owner, tag, date_str)
         for child in _family_children(family):
-            changed = _remove_family_tag_from_user(child, tag) or changed
+            changed = _remove_family_tag_from_user(child, tag, date_str) or changed
         if not changed:
             return jsonify({"error": "Family task not found"}), 404
         db.session.commit()
@@ -1495,6 +1563,8 @@ def block_delete():
     # delete by block (robust matching)
     cand = payload.get("block")
     if isinstance(cand, dict):
+        cand = dict(cand)
+        cand["date"] = date_str
         idx = _first_match_index(blocks, cand)
         if idx >= 0:
             removed = blocks.pop(idx)
