@@ -51,6 +51,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController _inviteChildController = TextEditingController();
   bool _updatingCredentials = false;
   bool _switchingGoogle = false;
+  bool _unlinkingGoogle = false;
   bool _sendingInvite = false;
   String? _googleError;
   String? _googleSuccess;
@@ -447,10 +448,109 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Future<void> _showDisplayNameDialog() async {
+    final controller = TextEditingController(text: _displayName);
+    final password = TextEditingController();
+    String? error;
+    bool busy = false;
+    final needsCurrent = (_authProvider != 'google');
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Change display name'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'New display name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (needsCurrent)
+                  TextField(
+                    controller: password,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Current password',
+                      border: OutlineInputBorder(),
+                    ),
+                  )
+                else
+                  Text(
+                    'Google-linked account: no current password needed.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                const SizedBox(height: 8),
+                Text(
+                  'Display names must be 1–100 characters.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final newName = controller.text.trim();
+                        final current = password.text.trim();
+                        if (newName.isEmpty) {
+                          setStateDialog(() => error = 'Enter a display name.');
+                          return;
+                        }
+                        if (newName.length > 100) {
+                          setStateDialog(() => error = 'Display name must be at most 100 characters.');
+                          return;
+                        }
+                        if (needsCurrent && current.isEmpty) {
+                          setStateDialog(() => error = 'Enter your current password.');
+                          return;
+                        }
+                        setStateDialog(() {
+                          busy = true;
+                          error = null;
+                        });
+                        final result = await _performCredentialUpdate(
+                          newDisplayName: newName,
+                          currentPassword: needsCurrent ? current : '',
+                        );
+                        if (result == null) {
+                          if (mounted) _showSnack('Display name updated.');
+                          if (context.mounted) Navigator.pop(context);
+                        } else {
+                          setStateDialog(() {
+                            busy = false;
+                            error = result;
+                          });
+                        }
+                      },
+                child: busy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _showPasswordDialog() async {
     final newPass = TextEditingController();
     final confirm = TextEditingController();
     final current = TextEditingController();
+    final needsCurrent = (_authProvider != 'google');
     String? error;
     bool busy = false;
     await showDialog(
@@ -480,15 +580,28 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: current,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Current password',
-                    border: OutlineInputBorder(),
+                if (needsCurrent)
+                  Column(
+                    children: [
+                      TextField(
+                        controller: current,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Current password',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'Google-linked account: no current password needed. You can still use Google sign-in afterward.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
                 Text(
                   'Passwords must be 8–20 characters.',
                   style: Theme.of(context).textTheme.bodySmall,
@@ -517,7 +630,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           setStateDialog(() => error = 'Passwords do not match.');
                           return;
                         }
-                        if (currentPassword.isEmpty) {
+                        if (needsCurrent && currentPassword.isEmpty) {
                           setStateDialog(() => error = 'Enter your current password.');
                           return;
                         }
@@ -528,7 +641,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         final result = await _performCredentialUpdate(
                           newPassword: newPassword,
                           confirmPassword: confirmPassword,
-                          currentPassword: currentPassword,
+                          currentPassword: needsCurrent ? currentPassword : '',
                         );
                         if (result == null) {
                           if (mounted) _showSnack('Password updated.');
@@ -549,6 +662,108 @@ class _ProfilePageState extends State<ProfilePage> {
         },
       ),
     );
+  }
+
+  Future<void> _showUnlinkGoogleDialog() async {
+    final displayCtrl = TextEditingController(text: _displayName);
+    final usernameCtrl = TextEditingController(text: _username);
+    final passwordCtrl = TextEditingController();
+    String? error;
+    bool busy = false;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Remove Google sign-in'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: displayCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Display name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: usernameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Username',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Choose a password',
+                    helperText: '8–20 characters',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final display = displayCtrl.text.trim();
+                        final username = usernameCtrl.text.trim();
+                        final password = passwordCtrl.text;
+                        if (display.isEmpty) {
+                          setStateDialog(() => error = 'Enter a display name.');
+                          return;
+                        }
+                        if (username.isEmpty) {
+                          setStateDialog(() => error = 'Enter a username.');
+                          return;
+                        }
+                        if (password.length < 8 || password.length > 20) {
+                          setStateDialog(() => error = 'Password must be 8–20 characters.');
+                          return;
+                        }
+                        setStateDialog(() {
+                          busy = true;
+                          error = null;
+                        });
+                        final result = await _performUnlinkGoogle(
+                          displayName: display,
+                          username: username,
+                          password: password,
+                        );
+                        if (result == null && context.mounted) {
+                          Navigator.of(context).pop();
+                        } else {
+                          setStateDialog(() {
+                            busy = false;
+                            error = result;
+                          });
+                        }
+                      },
+                child: busy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Remove link'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    displayCtrl.dispose();
+    usernameCtrl.dispose();
+    passwordCtrl.dispose();
   }
 
   Future<void> _showFamilyNameDialog() async {
@@ -749,6 +964,7 @@ class _ProfilePageState extends State<ProfilePage> {
     String? newUsername,
     String? newPassword,
     String? confirmPassword,
+    String? newDisplayName,
     required String currentPassword,
   }) async {
     setState(() => _updatingCredentials = true);
@@ -758,6 +974,7 @@ class _ProfilePageState extends State<ProfilePage> {
         newUsername: (newUsername?.trim().isEmpty ?? true) ? null : newUsername!.trim(),
         newPassword: (newPassword?.isEmpty ?? true) ? null : newPassword,
         confirmPassword: (confirmPassword?.isEmpty ?? true) ? null : confirmPassword,
+        newDisplayName: (newDisplayName?.trim().isEmpty ?? true) ? null : newDisplayName!.trim(),
       );
       if (!mounted) return 'Operation cancelled.';
       if (response.token != null) {
@@ -765,6 +982,9 @@ class _ProfilePageState extends State<ProfilePage> {
       }
       if (response.username != null) {
         setState(() => _username = response.username!);
+      }
+      if (response.displayName != null) {
+        setState(() => _displayName = response.displayName!);
       }
       return null;
     } catch (e) {
@@ -884,6 +1104,38 @@ class _ProfilePageState extends State<ProfilePage> {
       if (mounted) {
         setState(() => _switchingGoogle = false);
       }
+    }
+  }
+
+  Future<String?> _performUnlinkGoogle({
+    required String displayName,
+    required String username,
+    required String password,
+  }) async {
+    setState(() => _unlinkingGoogle = true);
+    try {
+      final response = await AccountService.unlinkGoogleAccount(
+        displayName: displayName,
+        username: username,
+        password: password,
+      );
+      if (!mounted) return 'Operation cancelled.';
+      if (response.token != null) {
+        AppGlobals.token = response.token!;
+      }
+      setState(() {
+        _authProvider = 'password';
+        _username = response.username ?? username;
+        _displayName = response.displayName ?? displayName;
+        _googleSuccess = 'Google account removed. Use your username & password next time.';
+        _googleError = null;
+      });
+      await _fetchProfile();
+      return null;
+    } catch (e) {
+      return _friendlyErrorMessage(e);
+    } finally {
+      if (mounted) setState(() => _unlinkingGoogle = false);
     }
   }
 
@@ -1245,14 +1497,21 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const Divider(height: 0),
           ListTile(
+            leading: const Icon(Icons.badge_outlined),
+            title: const Text('Change display name'),
+            subtitle: Text('Current: $_displayName'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _showDisplayNameDialog,
+          ),
+          const Divider(height: 0),
+          ListTile(
             leading: const Icon(Icons.lock_reset),
             title: const Text('Change password'),
             subtitle: Text(isGoogle
-                ? 'Google-linked accounts can’t change the password from here.'
+                ? 'Set a fallback password in addition to Google sign-in.'
                 : 'Update your account password'),
             trailing: const Icon(Icons.chevron_right),
-            enabled: !isGoogle,
-            onTap: isGoogle ? null : _showPasswordDialog,
+            onTap: _showPasswordDialog,
           ),
         ],
       ),
@@ -1337,6 +1596,14 @@ class _ProfilePageState extends State<ProfilePage> {
                   style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontSize: 12),
                 ),
               ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: (configIssue != null || _unlinkingGoogle) ? null : _showUnlinkGoogleDialog,
+              icon: _unlinkingGoogle
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.link_off),
+              label: Text(_unlinkingGoogle ? 'Removing...' : 'Remove Google link'),
+            ),
           ],
         ),
       ),

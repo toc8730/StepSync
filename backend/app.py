@@ -1154,12 +1154,18 @@ def account_update_credentials():
         return jsonify({"error": "User not found"}), 404
 
     payload = request.get_json(silent=True) or {}
+    require_password = (user.auth_provider or "password") != "google"
     current_password = (payload.get("current_password") or payload.get("password") or "").strip()
-    if not current_password:
-        return jsonify({"error": "Current password is required."}), 400
-    if not _require_password(user, current_password):
-        return jsonify({"error": "Incorrect password."}), 403
+    if require_password:
+        if not current_password:
+            return jsonify({"error": "Current password is required."}), 400
+        if not _require_password(user, current_password):
+            return jsonify({"error": "Incorrect password."}), 403
+    elif current_password:
+        if not _require_password(user, current_password):
+            return jsonify({"error": "Incorrect password."}), 403
 
+    new_display = _clean_display_name(payload.get("display_name"), payload.get("displayName"))
     new_username = (payload.get("new_username") or "").strip()
     new_password = str(payload.get("new_password") or "")
     confirm_val = payload.get("confirm_password")
@@ -1168,6 +1174,12 @@ def account_update_credentials():
     confirm = str(confirm_val) if confirm_val is not None else None
 
     changes: list[str] = []
+    if new_display:
+        if len(new_display) > 100:
+            return jsonify({"error": "Display name must be at most 100 characters."}), 400
+        user.display_name = new_display
+        changes.append("display_name")
+
     if new_username and new_username != user.username:
         if len(new_username) > 100:
             return jsonify({"error": "Username must be 1–100 characters."}), 400
@@ -1199,6 +1211,7 @@ def account_update_credentials():
         "username": user.username,
         "token": new_token,
         "changed": changes,
+        "display_name": user.display_name,
     }), 200
 
 @app.route("/account/google/switch", methods=["POST"])
@@ -1240,6 +1253,47 @@ def account_switch_google():
         "message": "Google account linked." if linking else "Google account updated.",
         "username": user.username,
         "email": user.email,
+        "token": new_token,
+    }), 200
+
+@app.route("/account/google/unlink", methods=["POST"])
+@jwt_required()
+def account_unlink_google():
+    user = _current_user_from_token()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if (user.auth_provider or "password") != "google":
+        return jsonify({"error": "This account is not linked to Google."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    display_name = _clean_display_name(payload.get("display_name"), payload.get("displayName"))
+    username = (payload.get("username") or "").strip()
+    password = (payload.get("password") or "").strip()
+
+    if not display_name:
+        return jsonify({"error": "Display name is required."}), 400
+    if not username:
+        return jsonify({"error": "Username is required."}), 400
+    if len(username) > 100:
+        return jsonify({"error": "Username must be at most 100 characters."}), 400
+    if not (8 <= len(password) <= 20):
+        return jsonify({"error": "Password must be 8\u201320 characters."}), 400
+
+    conflict = User.query.filter(User.username == username, User.id != user.id).first()
+    if conflict:
+        return jsonify({"error": "That username is already taken."}), 409
+
+    user.display_name = display_name
+    user.username = username
+    user.password = generate_password_hash(password)
+    user.auth_provider = "password"
+
+    db.session.commit()
+    new_token = create_access_token(identity=user.username)
+    return jsonify({
+        "message": "Google account unlinked.",
+        "username": user.username,
+        "display_name": user.display_name,
         "token": new_token,
     }), 200
 

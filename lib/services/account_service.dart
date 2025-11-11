@@ -6,11 +6,12 @@ import '../config/backend_config.dart';
 import '../data/globals.dart';
 
 class AccountUpdateResponse {
-  const AccountUpdateResponse({this.username, this.email, this.token});
+  const AccountUpdateResponse({this.username, this.email, this.token, this.displayName});
 
   final String? username;
   final String? email;
   final String? token;
+  final String? displayName;
 
   factory AccountUpdateResponse.fromJson(Map<String, dynamic> json) {
     String? clean(String? value) {
@@ -23,6 +24,7 @@ class AccountUpdateResponse {
       username: clean(json['username']?.toString()),
       email: clean(json['email']?.toString()),
       token: clean(json['token']?.toString()),
+      displayName: clean(json['display_name']?.toString()),
     );
   }
 }
@@ -40,12 +42,14 @@ class AccountService {
     String? newUsername,
     String? newPassword,
     String? confirmPassword,
+    String? newDisplayName,
   }) async {
     final payload = <String, String>{
       'current_password': currentPassword,
       if (newUsername != null && newUsername.trim().isNotEmpty) 'new_username': newUsername.trim(),
       if (newPassword != null && newPassword.isNotEmpty) 'new_password': newPassword,
       if (confirmPassword != null && confirmPassword.isNotEmpty) 'confirm_password': confirmPassword,
+      if (newDisplayName != null && newDisplayName.trim().isNotEmpty) 'display_name': newDisplayName.trim(),
     };
 
     final response = await http.post(
@@ -73,6 +77,24 @@ class AccountService {
     );
 
     return _mapResponse(response, context: 'switch Google account');
+  }
+
+  static Future<AccountUpdateResponse> unlinkGoogleAccount({
+    required String displayName,
+    required String username,
+    required String password,
+  }) async {
+    final payload = <String, String>{
+      'display_name': displayName,
+      'username': username,
+      'password': password,
+    };
+    final response = await http.post(
+      Uri.parse('$_baseUrl/account/google/unlink'),
+      headers: _headers(),
+      body: json.encode(payload),
+    );
+    return _mapResponse(response, context: 'unlink Google account');
   }
 
   static AccountUpdateResponse _mapResponse(http.Response response, {required String context}) {
