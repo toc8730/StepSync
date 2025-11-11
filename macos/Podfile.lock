@@ -9,7 +9,7 @@ PODS:
     - GoogleUtilities/Environment (~> 8.0)
     - GoogleUtilities/UserDefaults (~> 8.0)
     - PromisesObjC (~> 2.4)
-  - cloud_functions (6.0.3):
+  - cloud_functions (6.0.4):
     - Firebase/CoreOnly (~> 12.4.0)
     - Firebase/Functions (~> 12.4.0)
     - firebase_core
@@ -29,15 +29,15 @@ PODS:
   - Firebase/Messaging (12.4.0):
     - Firebase/CoreOnly
     - FirebaseMessaging (~> 12.4.0)
-  - firebase_auth (6.1.1):
+  - firebase_auth (6.1.2):
     - Firebase/Auth (~> 12.4.0)
     - Firebase/CoreOnly (~> 12.4.0)
     - firebase_core
     - FlutterMacOS
-  - firebase_core (4.2.0):
+  - firebase_core (4.2.1):
     - Firebase/CoreOnly (~> 12.4.0)
     - FlutterMacOS
-  - firebase_messaging (16.0.3):
+  - firebase_messaging (16.0.4):
     - Firebase/CoreOnly (~> 12.4.0)
     - Firebase/Messaging (~> 12.4.0)
     - firebase_core
@@ -221,13 +221,13 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   AppAuth: d4f13a8fe0baf391b2108511793e4b479691fb73
   AppCheckCore: cc8fd0a3a230ddd401f326489c99990b013f0c4f
-  cloud_functions: bf6bc1274fcfb08ac4454c40e6a04e7e8d1b7e46
+  cloud_functions: 0ff17842e6d381bffde6b07d8b582a051f33a344
   file_picker: 7584aae6fa07a041af2b36a2655122d42f578c1a
   file_selector_macos: 9e9e068e90ebee155097d00e89ae91edb2374db7
   Firebase: f07b15ae5a6ec0f93713e30b923d9970d144af3e
-  firebase_auth: b6e7af6050a882814c2450b4302f680abde292a9
-  firebase_core: d81d1a44df95699ce074ae63d8cb43e9df21e142
-  firebase_messaging: 31f412ae5a54e02d1c46d467969f7ad92c4b81ec
+  firebase_auth: 87ea88759d0282ccf1e2afe96f88ff3c07547938
+  firebase_core: e054894ab56033ef9bcbe2d9eac9395e5306e2fc
+  firebase_messaging: 373ac3a56e5aa37bb9aff4127f700aa5973c1168
   FirebaseAppCheckInterop: f734c802f21fe1da0837708f0f9a27218c8a4ed0
   FirebaseAuth: 4a2aed737c84114a9d9b33d11ae1b147d6b94889
   FirebaseAuthInterop: 858e6b754966e70740a4370dd1503dfffe6dbb49
