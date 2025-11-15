@@ -10,7 +10,6 @@ import '../widgets/quick_actions.dart';
 import '../widgets/task_editor_dialog.dart';
 import '../widgets/task_tile.dart';
 import 'task_detail_page.dart';
-import 'create_account_page.dart';
 import 'login_page.dart';
 
 class GuidedHomePage extends StatefulWidget {
@@ -327,21 +326,10 @@ class _GuidedHomePageState extends State<GuidedHomePage> with SingleTickerProvid
         backgroundColor: Theme.of(context).colorScheme.surface,
         actions: [
           TextButton(
-            onPressed: () async {
+            onPressed: () {
               ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
-              final result = await Navigator.of(context).push<CreateAccountResult?>(
-                MaterialPageRoute(builder: (_) => const CreateAccountPage()),
-              );
-              if (!mounted || result == null) return;
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (_) => LoginPage(
-                    initialUsername: result.username,
-                    initialPassword: result.password,
-                    autoSubmit: true,
-                  ),
-                ),
-                (route) => false,
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LoginPage()),
               );
             },
             child: const Text('Create account'),
