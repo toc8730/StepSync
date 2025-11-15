@@ -17,6 +17,7 @@ jobs:
       FLUTTER_VERSION: "3.24.3"
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+      GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,11 +54,16 @@ jobs:
             echo "GOOGLE_WEB_CLIENT_ID is not set. Add it as a repository secret before running this workflow."
             exit 1
           fi
+          if [[ -z "${GOOGLE_IOS_CLIENT_ID}" ]]; then
+            echo "GOOGLE_IOS_CLIENT_ID is not set. Add it as a repository secret before running this workflow."
+            exit 1
+          fi
           flutter build web \
             --release \
             --base-href "${{ steps.basehref.outputs.base_href }}" \
             --dart-define=GROQ_API_KEY="${GROQ_API_KEY}" \
-            --dart-define=GOOGLE_WEB_CLIENT_ID="${GOOGLE_WEB_CLIENT_ID}"
+            --dart-define=GOOGLE_WEB_CLIENT_ID="${GOOGLE_WEB_CLIENT_ID}" \
+            --dart-define=GOOGLE_IOS_CLIENT_ID="${GOOGLE_IOS_CLIENT_ID}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
