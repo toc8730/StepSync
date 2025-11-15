@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FLUTTER_VERSION: "3.24.3"
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,7 +43,15 @@ jobs:
           fi
 
       - name: Build Flutter web app
-        run: flutter build web --release --base-href "${{ steps.basehref.outputs.base_href }}"
+        run: |
+          if [[ -z "${GROQ_API_KEY}" ]]; then
+            echo "GROQ_API_KEY is not set. Add it as a repository secret before running this workflow."
+            exit 1
+          fi
+          flutter build web \
+            --release \
+            --base-href "${{ steps.basehref.outputs.base_href }}" \
+            --dart-define=GROQ_API_KEY="${GROQ_API_KEY}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

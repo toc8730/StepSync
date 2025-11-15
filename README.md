@@ -1,4 +1,4 @@
-# My App
+# StepSync
 
 Flutter + Flask playground for experimenting with family schedules, notifications, and Google authentication.
 
@@ -74,7 +74,7 @@ Judges can try the app instantly if you host the Flutter web build on GitHub Pag
    ```
 2. **Push to GitHub.** Make sure the workflow file is on the default branch. Update `FLUTTER_VERSION` inside the workflow if your local `flutter --version` differs.
 3. **Let the workflow run.** On GitHub, open the *Actions* tab → *Deploy Flutter Web to GitHub Pages* to watch the build/deploy logs.
-4. **Turn on Pages.** In *Settings → Pages*, set the source to *Deploy from a branch*, pick `gh-pages` and `/ (root)`. GitHub will print the final URL (usually `https://USERNAME.github.io/REPO_NAME/`). Keep this link handy.
+4. **Turn on Pages.** In *Settings → Pages*, set the source to *Deploy from a branch*, pick `gh-pages` and `/ (root)`. GitHub will print the final URL (for this repo it will be `https://toc8730.github.io/StepSync/`). Keep this link handy.
 
 ### Test the hosted build
 
@@ -94,7 +94,7 @@ Once you have the Pages URL, you can:
   ```bash
   python - <<'PY'
   import qrcode
-  url = "https://USERNAME.github.io/REPO_NAME/"  # replace with your live link
+  url = "https://toc8730.github.io/StepSync/"  # Pages URL for StepSync
   qrcode.make(url).save("web-demo-qr.png")
   print("Saved web-demo-qr.png pointing to", url)
   PY
@@ -102,3 +102,11 @@ Once you have the Pages URL, you can:
 - Or drop the link into any online QR tool (e.g., <https://www.qr-code-generator.com/>) and download a printable PNG/SVG.
 
 Print or display the QR at the judging table. Anyone who scans it loads the hosted Flutter web build with no installs required.
+
+### (Temporary) Passing the Groq API key via `dart-define`
+
+> ⚠️ **High risk:** Anything you pass through `--dart-define` is embedded inside the compiled web/desktop bundles. Anyone can open dev tools and steal the key. Use this only for short-lived demos and rotate the key immediately afterward.
+
+1. **Locally**: run the app with `flutter run -d chrome --dart-define=GROQ_API_KEY=YOUR_KEY_HERE` so the web client can talk directly to Groq during testing.
+2. **GitHub Pages build**: add a repository secret named `GROQ_API_KEY`, then let the workflow inject it (see `.github/workflows/deploy_web.yml`). The published web bundle will read `const groqKey = String.fromEnvironment('GROQ_API_KEY')`.
+3. **After demo day**: delete/rotate the key and move the Groq call behind your backend so secrets stay server-side.
