@@ -145,8 +145,8 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
 
   Future<void> _deleteAllTemplates() async {
     final deletable = [
-      ..._personal.where((t) => t.canDelete && t.id != null),
-      ..._family.where((t) => t.canDelete && t.id != null),
+      ..._personal.where((t) => t.canDelete),
+      ..._family.where((t) => t.canDelete),
     ];
     if (deletable.isEmpty) {
       _snack('No templates you can delete.');
@@ -168,12 +168,12 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
     setState(() => _mutating = true);
     try {
       for (final item in deletable) {
-        await TemplateService.deleteTemplate(item.id!);
+        await TemplateService.deleteTemplate(item.id);
       }
       if (!mounted) return;
       setState(() {
-        _personal = _personal.where((t) => !(t.canDelete && t.id != null)).toList();
-        _family = _family.where((t) => !(t.canDelete && t.id != null)).toList();
+        _personal = _personal.where((t) => !(t.canDelete)).toList();
+        _family = _family.where((t) => !(t.canDelete)).toList();
       });
       _snack('Deleted ${deletable.length} template${deletable.length == 1 ? '' : 's'}.');
     } catch (e) {
@@ -267,7 +267,7 @@ class _TemplatePickerDialogState extends State<TemplatePickerDialog> {
     final filtered = query.isEmpty
         ? items
         : items.where((item) {
-      final haystack = (item.template.title + ' ' + item.template.steps.join(' ')).toLowerCase();
+      final haystack = ('${item.template.title} ${item.template.steps.join(' ')}').toLowerCase();
       return haystack.contains(query);
     }).toList();
     return _sortByFavorites(filtered);

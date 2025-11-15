@@ -15,7 +15,7 @@ class FavoritesData {
   final Set<String> routineIds;
 
   factory FavoritesData.fromJson(Map<String, dynamic> json) {
-    Set<String> _parse(dynamic value) {
+    Set<String> parse(dynamic value) {
       if (value is List) {
         return value.map((e) => e?.toString() ?? '').where((e) => e.isNotEmpty).toSet();
       }
@@ -23,8 +23,8 @@ class FavoritesData {
     }
 
     return FavoritesData(
-      templateIds: _parse(json['templates']),
-      routineIds: _parse(json['routines']),
+      templateIds: parse(json['templates']),
+      routineIds: parse(json['routines']),
     );
   }
 }

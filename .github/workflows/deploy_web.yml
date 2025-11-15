@@ -1,0 +1,60 @@
+name: Deploy Flutter Web to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLUTTER_VERSION: "3.24.3"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Enable Flutter web
+        run: flutter config --enable-web
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Determine base href
+        id: basehref
+        run: |
+          if [[ "${GITHUB_REPOSITORY}" == "${GITHUB_REPOSITORY_OWNER}/${GITHUB_REPOSITORY_OWNER}.github.io" ]]; then
+            echo "base_href=/" >> "$GITHUB_OUTPUT"
+          else
+            repo_name="${GITHUB_REPOSITORY#*/}"
+            echo "base_href=/${repo_name}/" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Flutter web app
+        run: flutter build web --release --base-href "${{ steps.basehref.outputs.base_href }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-web
+          path: build/web
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: build/web
+          user_name: github-actions[bot]
+          user_email: github-actions[bot]@users.noreply.github.com

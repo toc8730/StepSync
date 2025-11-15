@@ -68,7 +68,7 @@ class RoutineEditorPage extends StatefulWidget {
 class _RoutineEditorPageState extends State<RoutineEditorPage> {
   late final TextEditingController _nameCtrl;
   late List<Task> _tasks;
-  bool _busy = false;
+  final bool _busy = false;
 
   @override
   void initState() {

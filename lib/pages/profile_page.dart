@@ -1434,7 +1434,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 iconSize: 16,
                 icon: const Icon(Icons.copy),
                 onPressed: () {
-                  Clipboard.setData(ClipboardData(text: id!));
+                  Clipboard.setData(ClipboardData(text: id));
                   _showSnack('Family identifier copied.');
                 },
               ),

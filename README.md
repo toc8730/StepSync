@@ -62,3 +62,43 @@ If you change your OAuth credentials, update both the backend environment variab
 3. Use the login screen to sign in with Google or the traditional username/password flow.
 
 Happy hacking!
+
+## Ship a Web Demo on GitHub Pages (for QR Codes)
+
+Judges can try the app instantly if you host the Flutter web build on GitHub Pages. This repo now includes `.github/workflows/deploy_web.yml`, which compiles the app for web and publishes the `build/web` folder to a `gh-pages` branch every time you push to `main` or `master`.
+
+1. **Enable Flutter web locally (one time):**
+   ```bash
+   flutter config --enable-web
+   flutter run -d chrome   # optional smoke test before committing
+   ```
+2. **Push to GitHub.** Make sure the workflow file is on the default branch. Update `FLUTTER_VERSION` inside the workflow if your local `flutter --version` differs.
+3. **Let the workflow run.** On GitHub, open the *Actions* tab → *Deploy Flutter Web to GitHub Pages* to watch the build/deploy logs.
+4. **Turn on Pages.** In *Settings → Pages*, set the source to *Deploy from a branch*, pick `gh-pages` and `/ (root)`. GitHub will print the final URL (usually `https://USERNAME.github.io/REPO_NAME/`). Keep this link handy.
+
+### Test the hosted build
+
+Whenever you want the latest code online:
+
+```bash
+git push origin main   # or the branch that triggers the workflow
+```
+
+Wait for the workflow to finish (1–2 minutes). Refresh the Pages URL with cache-busting (add `?v=2`) if you do not immediately see the update.
+
+### Create the QR code
+
+Once you have the Pages URL, you can:
+
+- Generate a QR inside the terminal (requires `pip install qrcode[pil]` once):
+  ```bash
+  python - <<'PY'
+  import qrcode
+  url = "https://USERNAME.github.io/REPO_NAME/"  # replace with your live link
+  qrcode.make(url).save("web-demo-qr.png")
+  print("Saved web-demo-qr.png pointing to", url)
+  PY
+  ```
+- Or drop the link into any online QR tool (e.g., <https://www.qr-code-generator.com/>) and download a printable PNG/SVG.
+
+Print or display the QR at the judging table. Anyone who scans it loads the hosted Flutter web build with no installs required.

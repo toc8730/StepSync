@@ -225,7 +225,7 @@ class _AnimatedBackdrop extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             colorScheme.surface,
-            colorScheme.surfaceVariant.withOpacity(0.6),
+            colorScheme.surfaceContainerHighest.withOpacity(0.6),
             colorScheme.surface,
           ],
           begin: Alignment.topCenter,
@@ -278,7 +278,7 @@ class _DevicePainter extends CustomPainter {
     final screen = RRect.fromRectAndRadius(rect, const Radius.circular(24));
     final screenPaint = Paint()
       ..shader = LinearGradient(
-        colors: [scheme.surface.withOpacity(0.95), scheme.surfaceVariant.withOpacity(0.8)],
+        colors: [scheme.surface.withOpacity(0.95), scheme.surfaceContainerHighest.withOpacity(0.8)],
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
       ).createShader(rect);
@@ -347,7 +347,7 @@ class _DevicePainter extends CustomPainter {
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(baseRect, const Radius.circular(12)),
-      Paint()..color = scheme.surfaceVariant.withOpacity(0.8),
+      Paint()..color = scheme.surfaceContainerHighest.withOpacity(0.8),
     );
   }
 

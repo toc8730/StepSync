@@ -65,7 +65,7 @@ class FamilyService {
     if (list is List) {
       return list
           .whereType<Map>()
-          .map((item) => LeaveRequestInfo.fromJson(Map<String, dynamic>.from(item as Map)))
+          .map((item) => LeaveRequestInfo.fromJson(Map<String, dynamic>.from(item)))
           .toList();
     }
     return const [];
@@ -142,7 +142,7 @@ class FamilyService {
     if (list is List) {
       return list
           .whereType<Map>()
-          .map((item) => FamilyInviteInfo.fromJson(Map<String, dynamic>.from(item as Map)))
+          .map((item) => FamilyInviteInfo.fromJson(Map<String, dynamic>.from(item)))
           .toList();
     }
     return const [];
@@ -193,7 +193,7 @@ class FamilyMembers {
     List<FamilyMember> parseMembers(List list, {bool parents = false}) {
       return list
           .whereType<Map>()
-          .map((element) => Map<String, dynamic>.from(element as Map))
+          .map((element) => Map<String, dynamic>.from(element))
           .map((m) => FamilyMember(
                 username: (m['username'] ?? '').toString(),
                 displayName: FamilyMembers._cleanName(m['display_name'], fallback: m['username']),

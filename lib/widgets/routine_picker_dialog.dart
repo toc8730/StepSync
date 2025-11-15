@@ -78,7 +78,7 @@ class _RoutinePickerDialogState extends State<RoutinePickerDialog> {
     final filtered = q.isEmpty
         ? items
         : items.where((item) {
-      final haystack = (item.template.title + ' ' + item.template.description).toLowerCase();
+      final haystack = ('${item.template.title} ${item.template.description}').toLowerCase();
       return haystack.contains(q);
     }).toList();
     return _sortRoutines(filtered);
